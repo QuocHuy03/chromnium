@@ -3,34 +3,34 @@
   "name": "mac-m5-mbp14",
   "notes": "Apple M5 · MacBook Pro 14",
   "seed": "bf71288a61d3238bcf63d1a8cb498906f9bebf71644766437c3856e48f2656f7",
-  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
   "user_agent_data": {
     "brands": [
       {
         "brand": "Google Chrome",
-        "version": "148"
+        "version": "153"
       },
       {
         "brand": "Chromium",
-        "version": "148"
+        "version": "153"
       },
       {
-        "brand": "Not/A)Brand",
-        "version": "99"
+        "brand": "Not_A Brand",
+        "version": "8"
       }
     ],
     "full_version_list": [
       {
         "brand": "Google Chrome",
-        "version": "148.0.7778.216"
+        "version": "153.0.8010.36"
       },
       {
         "brand": "Chromium",
-        "version": "148.0.7778.216"
+        "version": "153.0.8010.36"
       },
       {
-        "brand": "Not/A)Brand",
-        "version": "99.0.0.0"
+        "brand": "Not_A Brand",
+        "version": "8.0.0.0"
       }
     ],
     "platform": "macOS",

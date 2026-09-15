@@ -165,11 +165,20 @@ Two include conflicts. Keep 153's includes and add chronium's:
 
 ## After it builds
 
-- Update the 170 bundled fingerprint JSONs to the real 153 binary:
-  `user_agent`, `user_agent_data` (brands + fullVersionList +
-  uaFullVersion + platformVersion) to 153.0.8010.36, or CreepJS "Features"
-  reads a mismatched UA. (Baseline values are being measured from CfT 153
-  and will be provided.)
+- The 170 profile templates in `config/profiles/*.json` are ALREADY bumped
+  to 153 (measured on real CfT 153.0.8010.36 / GTX 1060):
+  - `user_agent` -> `Chrome/153.0.0.0`
+  - `user_agent_data.brands` -> Google Chrome/Chromium `153`, GREASE
+    `Not_A Brand`/`8`
+  - `user_agent_data.full_version_list` -> `153.0.8010.36`, GREASE `8.0.0.0`
+  - `platform` / `platform_version` left as-is (OS-specific, not Chrome).
+  Re-encrypt them to the shipped `.json.enc` with `scripts\encrypt-profiles.py`
+  after the build. Timezone canonical names (Asia/Saigon etc.) and the
+  WebGL1/WebGL2 extension lists were identical to 148 on this GPU, so no
+  other profile change is needed.
+- All 170 full_version_list entries now read `153.0.8010.36` (the one build
+  measured). Real fleets cluster on the latest during a rollout, so this is
+  fine; vary it later if you obtain other real 153 build numbers.
 - Re-export the resolved series so the next build is conflict-free:
   `git format-patch refs/tags/148.0.7778.217..HEAD -o patches\` after the
   final commit — or better, once on 153, re-base the tag reference.
