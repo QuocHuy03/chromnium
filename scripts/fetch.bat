@@ -13,7 +13,7 @@ REM  This is a one-time step (~1-2 hours, ~50 GB download).
 REM ============================================================
 
 REM ---- Edit this when bumping Chromium version ----
-set "STABLE_TAG=152.0.7977.83"
+set "STABLE_TAG=153.0.8010.36"
 REM -------------------------------------------------
 
 if not "%~1"=="" set "STABLE_TAG=%~1"
