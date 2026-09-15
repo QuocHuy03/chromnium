@@ -532,7 +532,7 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
       SkIRect bounds =
           snapshot->PaintImageForCurrentFrame().GetSkImageInfo().bounds();
       DCHECK(!bounds.intersect(SkIRect::MakeXYWH(sx, sy, sw, sh)));
-    } else if (FingerprintState::IsActive() &&
+    } else if (FingerprintState::LegacyCanvasReadNoiseEnabled() &&
                image_data_pixmap.info().bytesPerPixel() == 4 &&
                image_data_pixmap.writable_addr() != nullptr) {
       // Chronium: per-profile seeded noise on the returned pixel buffer.
@@ -1128,6 +1128,19 @@ void BaseRenderingContext2D::DrawTextInternal(
     InflateStrokeRect(bounds);
   }
 
+  // Chronium (noise.version 2): draw the text with a seeded sub-pixel shift
+  // and scale about its anchor instead of perturbing pixels on read. Flat
+  // fills and putImageData round-trips stay exact, and getImageData /
+  // toDataURL / toBlob all read the same bitmap. Outset the bounds so damage
+  // tracking covers the (sub-pixel) movement.
+  const std::optional<std::pair<float, float>> text_noise =
+      FingerprintState::CanvasTextNoise();
+  if (text_noise) {
+    bounds.Outset((bounds.width() + bounds.height()) *
+                      std::abs(text_noise->first - 1.0f) +
+                  std::abs(text_noise->second) + 1.0f);
+  }
+
   if (use_max_width) {
     paint_canvas->save();
     // We draw when fontWidth is 0 so compositing operations (eg, a "copy" op)
@@ -1141,8 +1154,9 @@ void BaseRenderingContext2D::DrawTextInternal(
   Draw<OverdrawOp::kNone>(
       /*draw_func=*/
       [font, text = std::move(text), direction, bidi_override, location,
-       run_start, run_end, canvas, &text_painter](MemoryManagedPaintCanvas* c,
-                                                  const cc::PaintFlags* flags) {
+       run_start, run_end, canvas, text_noise,
+       &text_painter](MemoryManagedPaintCanvas* c,
+                      const cc::PaintFlags* flags) {
         TextRun text_run(text, direction, bidi_override);
         // Font::DrawType::kGlyphsAndClusters is required for printing to PDF,
         // otherwise the character to glyph mapping will not be reversible,
@@ -1156,9 +1170,18 @@ void BaseRenderingContext2D::DrawTextInternal(
         Font::DrawType draw_type = (canvas && canvas->IsPrinting())
                                        ? Font::DrawType::kGlyphsAndClusters
                                        : Font::DrawType::kGlyphsOnly;
+        if (text_noise) {
+          c->save();
+          c->translate(location.x() + text_noise->second, location.y());
+          c->scale(text_noise->first, text_noise->first);
+          c->translate(-location.x(), -location.y());
+        }
         text_painter.DrawWithBidiReorder(text_run, run_start, run_end, *font,
                                          Font::kUseFallbackIfFontNotReady, *c,
                                          location, *flags, draw_type);
+        if (text_noise) {
+          c->restore();
+        }
       },
       NoOverdraw, bounds, paint_type, CanvasRenderingContext2DState::kNoImage,
       CanvasPerformanceMonitor::DrawType::kText);

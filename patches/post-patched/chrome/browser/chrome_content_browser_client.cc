@@ -2903,6 +2903,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
             switches::kFingerprintWebGLExtensions,
             base::HexEncode(base::as_byte_span(webgl_exts)));
       }
+      const std::string webgl1_exts = fp->WebGL1ExtensionsBlob();
+      if (!webgl1_exts.empty()) {
+        command_line->AppendSwitchASCII(
+            switches::kFingerprintWebGL1Extensions,
+            base::HexEncode(base::as_byte_span(webgl1_exts)));
+      }
       const std::string webgl_params = fp->WebGLParamsBlob();
       if (!webgl_params.empty()) {
         // Hex-encode for the same argv-tab/newline reason. Renderer
@@ -2920,6 +2926,16 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       if (!readpixels_noise.empty()) {
         command_line->AppendSwitchASCII(
             switches::kFingerprintWebGLReadPixelsNoise, readpixels_noise);
+      }
+      const std::string noise_version = fp->NoiseVersionValue();
+      if (!noise_version.empty()) {
+        command_line->AppendSwitchASCII(switches::kFingerprintNoiseVersion,
+                                        noise_version);
+      }
+      const std::string canvas_noise = fp->CanvasNoiseValue();
+      if (!canvas_noise.empty()) {
+        command_line->AppendSwitchASCII(switches::kFingerprintCanvasNoise,
+                                        canvas_noise);
       }
       // Chronium: explicitly propagate the profile locale to children
       // via --lang. Renderer's ICU initialization reads this switch

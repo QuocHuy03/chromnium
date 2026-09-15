@@ -25,7 +25,9 @@
 
 #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
 
+#include <algorithm>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/bit_cast.h"
@@ -37,6 +39,11 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notimplemented.h"
 #include "base/numerics/checked_math.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
@@ -3670,6 +3677,39 @@ bool WebGLRenderingContextBase::TimerQueryExtensionsEnabled() {
               .IsWorkaroundEnabled(gpu::ENABLE_WEBGL_TIMER_QUERY_EXTENSIONS));
 }
 
+namespace {
+
+// Chronium: the profile's extension allowlist for this context type
+// (webgl.extensions for WebGL2, webgl.extensions_webgl1 for WebGL1), or
+// nullopt when the profile has none and the real extension set applies.
+std::optional<std::vector<std::string>> ProfileExtensionAllowlist(
+    bool webgl2) {
+  if (webgl2) {
+    if (!FingerprintState::HasWebGLExtensions()) {
+      return std::nullopt;
+    }
+    return FingerprintState::WebGLExtensions();
+  }
+  if (!FingerprintState::HasWebGL1Extensions()) {
+    return std::nullopt;
+  }
+  return FingerprintState::WebGL1Extensions();
+}
+
+// Extension names are matched case-insensitively, like getExtension().
+bool AllowlistContains(const std::vector<std::string>& allowlist,
+                       const String& name) {
+  if (!name.ContainsOnlyAsciiOrEmpty()) {
+    return false;
+  }
+  const std::string ascii_name = name.Ascii();
+  return std::ranges::any_of(allowlist, [&](const std::string& entry) {
+    return base::EqualsCaseInsensitiveASCII(entry, ascii_name);
+  });
+}
+
+}  // namespace
+
 ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
                                                      const String& name) {
   ExecutionContext* context = ExecutionContext::From(script_state);
@@ -3678,7 +3718,15 @@ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
     UseCounter::Count(context, WebFeature::kWebGLDebugRendererInfo);
   }
 
-  WebGLExtension* extension = EnableExtensionIfSupported(name, context);
+  // Chronium: a name the allowlist hides from getSupportedExtensions() must
+  // not resolve here either, or the two disagree (BrowserScan "WebGL
+  // exception").
+  const std::optional<std::vector<std::string>> allowlist =
+      ProfileExtensionAllowlist(IsWebGL2());
+  WebGLExtension* extension =
+      (!allowlist || AllowlistContains(*allowlist, name))
+          ? EnableExtensionIfSupported(name, context)
+          : nullptr;
   return ScriptObject(
       script_state->GetIsolate(),
       ToV8Traits<IDLNullable<WebGLExtension>>::ToV8(script_state, extension));
@@ -4380,26 +4428,21 @@ WebGLRenderingContextBase::getSupportedExtensions() {
   if (isContextLost())
     return std::nullopt;
 
-  // Chronium: when the profile pins a list, return exactly that. The
-  // real driver extension set leaks the underlying GPU (ANGLE on D3D11
-  // vs Metal vs Vulkan) — bots that spoof unmasked_renderer but leave
-  // this untouched still get caught by anti-detect tooling that
-  // cross-checks "claims macOS Metal but reports
-  // ANGLE_provoking_vertex_compatibility (a D3D-only ext)". Returning
-  // the canned list keeps every WebGL surface coherent with the
-  // claimed GPU.
-  if (FingerprintState::HasWebGLExtensions()) {
-    Vector<String> result;
-    for (const auto& name : FingerprintState::WebGLExtensions()) {
-      result.push_back(String::FromUtf8(name));
-    }
-    return result;
-  }
-
+  // Chronium: filter the real list through the profile allowlist for this
+  // context type (WebGL1 and WebGL2 expose different sets). Names this GPU
+  // can't back are dropped, and getExtension() applies the same allowlist,
+  // so the list always equals the set of names getExtension() resolves.
+  // Returning the canned list verbatim broke that (13 listed-but-null and
+  // 16 hidden-but-available names on WebGL1). Order stays the real
+  // registration order, as in stock Chrome.
+  const std::optional<std::vector<std::string>> allowlist =
+      ProfileExtensionAllowlist(IsWebGL2());
   Vector<String> result;
 
   for (ExtensionTracker* tracker : extensions_) {
-    if (ExtensionSupportedAndAllowed(tracker)) {
+    if (ExtensionSupportedAndAllowed(tracker) &&
+        (!allowlist ||
+         AllowlistContains(*allowlist, tracker->ExtensionName()))) {
       result.push_back(tracker->ExtensionName());
     }
   }
@@ -5227,58 +5270,6 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
     }
     ContextGL()->ReadPixels(x, y, width, height, format, type, data);
   }
-
-  // Chronium: apply the same seeded "canvas" mask that toDataURL/toBlob
-  // (html_canvas_element.cc) and getImageData use, in canvas space, so
-  // readPixels, toDataURL and drawImage+getImageData agree pixel for pixel.
-  // Default framebuffer only: reads from app framebuffers are commonly GPU
-  // picking (object ids) and must stay exact. WebGL2 PIXEL_PACK_BUFFER reads
-  // never reach here (they go straight into a GPU buffer).
-  const WebGLImageConversion::PixelStoreParams pack = GetPackPixelStoreParams();
-  if (!framebuffer && FingerprintState::WebGLReadPixelsNoiseEnabled() &&
-      format == GL_RGBA && type == GL_UNSIGNED_BYTE && data && width > 0 &&
-      height > 0 && pack.alignment > 0 && pack.skip_pixels >= 0 &&
-      pack.skip_rows >= 0 &&
-      (pack.row_length <= 0 ||
-       static_cast<int64_t>(pack.skip_pixels) + width <= pack.row_length)) {
-    const gfx::Size buffer_size = GetDrawingBuffer()->Size();
-    // Row layout follows the pack params (WebGL2 adds PACK_ROW_LENGTH /
-    // PACK_SKIP_PIXELS / PACK_SKIP_ROWS), exactly as
-    // ValidateReadPixelsFuncParameters sized the destination.
-    const size_t alignment = static_cast<size_t>(pack.alignment);
-    const size_t row_pixels = static_cast<size_t>(
-        pack.row_length > 0 ? pack.row_length : width);
-    const size_t stride =
-        (row_pixels * 4u + alignment - 1u) / alignment * alignment;
-    const size_t first_row = static_cast<size_t>(pack.skip_rows) * stride;
-    const size_t skip_bytes = static_cast<size_t>(pack.skip_pixels) * 4u;
-    for (GLsizei r = 0; r < height; ++r) {
-      // GL rows are bottom-up; canvas snapshots are top-down.
-      // int64_t: y comes straight from script, y + r must not overflow.
-      const int64_t canvas_y = static_cast<int64_t>(buffer_size.height()) -
-                               1 - (static_cast<int64_t>(y) + r);
-      if (canvas_y < 0 || canvas_y >= buffer_size.height()) {
-        continue;
-      }
-      UNSAFE_TODO(uint8_t* row = data + first_row +
-                                 static_cast<size_t>(r) * stride + skip_bytes);
-      for (GLsizei c = 0; c < width; ++c) {
-        const int64_t canvas_x = static_cast<int64_t>(x) + c;
-        // Pixels outside the drawing buffer are not written by ReadPixels;
-        // leave them untouched.
-        if (canvas_x < 0 || canvas_x >= buffer_size.width()) {
-          continue;
-        }
-        const uint32_t hash = FingerprintState::HashAt(
-            "canvas", static_cast<uint32_t>(canvas_x),
-            static_cast<uint32_t>(canvas_y));
-        if ((hash & 0xFFu) == 0u) {
-          const uint32_t which = (hash >> 8) % 3u;  // R, G or B
-          UNSAFE_TODO(row[static_cast<size_t>(c) * 4u + which] ^= 1u);
-        }
-      }
-    }
-  }
 }
 
 void WebGLRenderingContextBase::RenderbufferStorageImpl(
@@ -5383,6 +5374,79 @@ void WebGLRenderingContextBase::scissor(GLint x,
   ContextGL()->Scissor(x, y, width, height);
 }
 
+namespace {
+
+// Chronium (noise.version 2): rewrites a vertex shader so gl_Position.xy
+// gets a seeded sub-pixel clip-space offset. WebGL pixels then differ per
+// profile at render time, so readPixels, toDataURL, toBlob and drawImage
+// all agree and a clear stays exact. The page's main() is renamed with a
+// #define and called from an appended main(). A #line directive after the
+// inserted line restores the page's own numbering, so compile-error logs
+// are unchanged (measured on Chrome 148 ANGLE for ESSL 1.00 and 3.00).
+std::string AddVertexOffset(const std::string& source, float dx, float dy) {
+  static constexpr char kInnerMain[] = "main_vs0";
+  const std::string_view src(source);
+
+  // #version, if present, must stay the first directive.
+  size_t body_start = 0;
+  size_t i = 0;
+  while (i < src.size()) {
+    if (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
+      ++i;
+    } else if (src.substr(i, 2) == "//") {
+      i = std::min(src.find('\n', i), src.size());
+    } else if (src.substr(i, 2) == "/*") {
+      const size_t end = src.find("*/", i + 2);
+      if (end == std::string_view::npos) {
+        return source;
+      }
+      i = end + 2;
+    } else {
+      break;
+    }
+  }
+  if (i < src.size() && src[i] == '#') {
+    const size_t word = src.find_first_not_of(" \t", i + 1);
+    if (word != std::string_view::npos &&
+        src.substr(word).starts_with("version")) {
+      const size_t eol = src.find('\n', word);
+      if (eol == std::string_view::npos) {
+        return source;
+      }
+      body_start = eol + 1;
+    }
+  }
+
+  // A shader with no main() at all keeps exactly the error the page expects.
+  auto is_ident = [](char c) {
+    return base::IsAsciiAlphaNumeric(c) || c == '_';
+  };
+  bool has_main = false;
+  for (size_t p = src.find("main", body_start); p != std::string_view::npos;
+       p = src.find("main", p + 4)) {
+    if ((p == 0 || !is_ident(src[p - 1])) &&
+        (p + 4 >= src.size() || !is_ident(src[p + 4]))) {
+      has_main = true;
+      break;
+    }
+  }
+  if (!has_main) {
+    return source;
+  }
+
+  const size_t body_line =
+      static_cast<size_t>(std::ranges::count(src.substr(0, body_start), '\n')) +
+      1;
+  return base::StrCat(
+      {src.substr(0, body_start), "#define main ", kInnerMain, "\n#line ",
+       base::NumberToString(body_line), "\n", src.substr(body_start),
+       "\n#undef main\nvoid main() {\n  ", kInnerMain,
+       "();\n  gl_Position.xy += vec2(", base::StringPrintf("%.6e", dx), ", ",
+       base::StringPrintf("%.6e", dy), ") * gl_Position.w;\n}\n"});
+}
+
+}  // namespace
+
 void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
                                              const String& string) {
   if (!ValidateWebGLProgramOrShader("shaderSource", shader))
@@ -5390,8 +5454,19 @@ void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
   String ascii_string = ReplaceNonASCII(string).Result();
   shader->SetSource(string);
   DCHECK(ascii_string.Is8Bit() && ascii_string.ContainsOnlyAsciiOrEmpty());
-  const GLchar* shader_data = base::as_chars(ascii_string.Span8()).data();
-  const GLint shader_length = ascii_string.length();
+  base::span<const char> source_chars = base::as_chars(ascii_string.Span8());
+  // Chronium: see AddVertexOffset. getShaderSource() still returns |string|.
+  std::string noised_source;
+  if (shader->GetType() == GL_VERTEX_SHADER) {
+    if (const auto offset = FingerprintState::WebGLVertexOffset()) {
+      noised_source =
+          AddVertexOffset(std::string(source_chars.begin(), source_chars.end()),
+                          offset->first, offset->second);
+      source_chars = base::span(noised_source);
+    }
+  }
+  const GLchar* shader_data = source_chars.data();
+  const GLint shader_length = base::checked_cast<GLint>(source_chars.size());
   ContextGL()->ShaderSource(ObjectOrZero(shader), 1, &shader_data,
                             &shader_length);
 }

@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -199,6 +200,13 @@ class PLATFORM_EXPORT FingerprintState {
   static std::vector<std::string> WebGLExtensions();
   static bool HasWebGLExtensions();
 
+  // WebGL1 getSupportedExtensions() allowlist (webgl.extensions_webgl1),
+  // same format. The list above applies to WebGL2 contexts only; a context
+  // type without a list reports its real extensions.
+  static void SetWebGL1Extensions(std::string_view newline_list);
+  static std::vector<std::string> WebGL1Extensions();
+  static bool HasWebGL1Extensions();
+
   // speechSynthesis.getVoices() override. Voices are stored as a single
   // serialized blob to avoid heap fragmentation across multiple
   // SpeechSynthesis instances. Format: lines separated by '\n', each line
@@ -230,11 +238,30 @@ class PLATFORM_EXPORT FingerprintState {
   // True when IsActive() and the amplitude is > 0.
   static bool AudioNoiseEnabled();
 
-  // WebGL readPixels noise (noise.webgl_readpixels). Default enabled, to
-  // match toDataURL/toBlob on a WebGL canvas, which is always noised.
-  static void SetWebGLReadPixelsNoise(bool enabled);
-  // True when IsActive() and the profile did not disable it.
-  static bool WebGLReadPixelsNoiseEnabled();
+  // Noise scheme (noise.version). 1, the default, keeps the legacy
+  // read-time canvas noise so profiles already signed in to accounts keep
+  // rendering exactly as before. 2 switches to render-time noise: canvas
+  // text is drawn with a seeded sub-pixel shift and scale, and WebGL vertex
+  // positions get a seeded sub-pixel offset. Nothing is altered on read,
+  // so getImageData / toDataURL / toBlob / readPixels / drawImage all see
+  // the same pixels, flat colours stay flat and putImageData round-trips
+  // stay exact.
+  static void SetNoiseVersion(int version);
+  static int NoiseVersion();
+
+  // noise.canvas_threshold: 0 turns canvas noise off, in both schemes.
+  static void SetCanvasNoise(bool enabled);
+  // Version 1 read-time LSB noise on canvas exports and getImageData.
+  static bool LegacyCanvasReadNoiseEnabled();
+  // Version 2 canvas text noise: {scale about the text anchor, horizontal
+  // shift in CSS px}; nullopt when off.
+  static std::optional<std::pair<float, float>> CanvasTextNoise();
+
+  // noise.webgl_readpixels: WebGL pixel noise, version 2 only (applied at
+  // render time through the vertex shader). Default enabled.
+  static void SetWebGLNoise(bool enabled);
+  // Seeded clip-space offset added to gl_Position.xy; nullopt when off.
+  static std::optional<std::pair<float, float>> WebGLVertexOffset();
 
   // Deterministic 32-bit hash of (process seed, channel, x, y).
   // |channel| should be a short stable string identifying the fingerprint

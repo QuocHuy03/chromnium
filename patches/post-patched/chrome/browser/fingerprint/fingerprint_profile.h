@@ -132,6 +132,8 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
   // WebGL getSupportedExtensions() list joined by '\n'. Empty = no
   // override.
   std::string WebGLExtensionsBlob() const;
+  // Same for webgl.extensions_webgl1 (the WebGL1 list). Empty when unset.
+  std::string WebGL1ExtensionsBlob() const;
 
   // WebGL getParameter() + getShaderPrecisionFormat() override. Built
   // from `webgl.params` (single ints / int-ranges / float-ranges) and
@@ -146,9 +148,16 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
   // keeps the legacy default amplitude of 1e-5).
   std::string AudioNoiseValue() const;
 
-  // noise.webgl_readpixels: "1" / "0". Empty when the profile doesn't set
-  // it (the renderer default is enabled).
+  // noise.webgl_readpixels (WebGL pixel noise): "1" / "0". Empty when the
+  // profile doesn't set it (the renderer default is enabled).
   std::string WebGLReadPixelsNoiseValue() const;
+
+  // noise.version as a decimal string. Empty when unset (legacy scheme 1).
+  std::string NoiseVersionValue() const;
+
+  // noise.canvas_threshold: "0" when <= 0 (canvas noise off), else "1".
+  // Empty when unset (the renderer default is enabled).
+  std::string CanvasNoiseValue() const;
 
  private:
   friend class base::NoDestructor<FingerprintProfile>;

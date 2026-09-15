@@ -417,20 +417,21 @@ std::string FingerprintProfile::WebAuthnUvpaValue() const {
   return *u ? "1" : "0";
 }
 
-std::string FingerprintProfile::WebGLExtensionsBlob() const {
-  if (!loaded_) {
-    return {};
-  }
-  const base::DictValue* webgl = dict_.FindDict("webgl");
+namespace {
+
+// The non-empty strings of `webgl.<key>` joined by '\n'; empty when unset.
+std::string JoinedWebGLStringList(const base::DictValue& root,
+                                  std::string_view key) {
+  const base::DictValue* webgl = root.FindDict("webgl");
   if (!webgl) {
     return {};
   }
-  const base::ListValue* exts = webgl->FindList("extensions");
-  if (!exts || exts->empty()) {
+  const base::ListValue* list = webgl->FindList(key);
+  if (!list || list->empty()) {
     return {};
   }
   std::string out;
-  for (const auto& item : *exts) {
+  for (const auto& item : *list) {
     const std::string* s = item.GetIfString();
     if (!s || s->empty()) {
       continue;
@@ -441,6 +442,22 @@ std::string FingerprintProfile::WebGLExtensionsBlob() const {
     out += *s;
   }
   return out;
+}
+
+}  // namespace
+
+std::string FingerprintProfile::WebGLExtensionsBlob() const {
+  if (!loaded_) {
+    return {};
+  }
+  return JoinedWebGLStringList(dict_, "extensions");
+}
+
+std::string FingerprintProfile::WebGL1ExtensionsBlob() const {
+  if (!loaded_) {
+    return {};
+  }
+  return JoinedWebGLStringList(dict_, "extensions_webgl1");
 }
 
 std::string FingerprintProfile::WebGLParamsBlob() const {
@@ -547,6 +564,36 @@ std::string FingerprintProfile::WebGLReadPixelsNoiseValue() const {
     return {};
   }
   return *enabled ? "1" : "0";
+}
+
+std::string FingerprintProfile::NoiseVersionValue() const {
+  if (!loaded_) {
+    return {};
+  }
+  const base::DictValue* noise = dict_.FindDict("noise");
+  if (!noise) {
+    return {};
+  }
+  std::optional<int> version = noise->FindInt("version");
+  if (!version.has_value() || *version <= 0) {
+    return {};
+  }
+  return base::NumberToString(*version);
+}
+
+std::string FingerprintProfile::CanvasNoiseValue() const {
+  if (!loaded_) {
+    return {};
+  }
+  const base::DictValue* noise = dict_.FindDict("noise");
+  if (!noise) {
+    return {};
+  }
+  std::optional<double> threshold = noise->FindDouble("canvas_threshold");
+  if (!threshold.has_value()) {
+    return {};
+  }
+  return *threshold > 0.0 ? "1" : "0";
 }
 
 bool FingerprintProfile::LoadFromFile(const base::FilePath& path) {

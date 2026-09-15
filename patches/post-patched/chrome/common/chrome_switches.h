@@ -197,10 +197,13 @@ extern const char kFingerprintSpeechVoices[];
 // override. "0" = force false, "1" = force true, absent = no override.
 extern const char kFingerprintWebAuthnUvpa[];
 
-// Chronium (internal): WebGL getSupportedExtensions() override. List of
+// Chronium (internal): WebGL2 getSupportedExtensions() allowlist. List of
 // extension names joined by '\n' and hex-encoded over the CLI to dodge
 // argv-splitting on whitespace.
 extern const char kFingerprintWebGLExtensions[];
+
+// Chronium (internal): same for WebGL1 contexts (webgl.extensions_webgl1).
+extern const char kFingerprintWebGL1Extensions[];
 
 // Chronium (internal): WebGL getParameter() + getShaderPrecisionFormat()
 // surface override. TSV blob (hex-encoded; same encoding rationale as
@@ -236,9 +239,17 @@ extern const char kAccountLabel[];
 // readouts; script-created AudioBuffers are never perturbed.
 extern const char kFingerprintAudioNoise[];
 
-// Chronium (internal): WebGL readPixels noise toggle from
+// Chronium (internal): WebGL pixel noise toggle from
 // noise.webgl_readpixels. "0" = disable, "1" = enable. Absent = enabled.
 extern const char kFingerprintWebGLReadPixelsNoise[];
+
+// Chronium (internal): noise scheme from noise.version ("1" legacy
+// read-time, "2" render-time). Absent = 1.
+extern const char kFingerprintNoiseVersion[];
+
+// Chronium (internal): canvas noise toggle from noise.canvas_threshold.
+// "0" = disable, "1" = enable. Absent = enabled.
+extern const char kFingerprintCanvasNoise[];
 
 extern const char kHideCrashRestoreBubble[];
 extern const char kHomePage[];

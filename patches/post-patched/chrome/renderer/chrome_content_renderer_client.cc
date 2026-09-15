@@ -563,6 +563,16 @@ void ChromeContentRendererClient::RenderThreadStarted() {
         blink::FingerprintState::SetWebGLExtensions(exts_blob);
       }
     }
+    const std::string webgl1_exts_hex =
+        cmd_line->GetSwitchValueASCII(switches::kFingerprintWebGL1Extensions);
+    if (!webgl1_exts_hex.empty()) {
+      std::vector<uint8_t> bytes;
+      if (base::HexStringToBytes(webgl1_exts_hex, &bytes) && !bytes.empty()) {
+        std::string_view exts_blob(
+            reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        blink::FingerprintState::SetWebGL1Extensions(exts_blob);
+      }
+    }
     const std::string webgl_params_hex =
         cmd_line->GetSwitchValueASCII(switches::kFingerprintWebGLParams);
     if (!webgl_params_hex.empty()) {
@@ -581,11 +591,21 @@ void ChromeContentRendererClient::RenderThreadStarted() {
       blink::FingerprintState::SetAudioNoiseAmplitude(
           static_cast<float>(audio_amplitude));
     }
-    const std::string readpixels_noise = cmd_line->GetSwitchValueASCII(
+    const std::string webgl_noise = cmd_line->GetSwitchValueASCII(
         switches::kFingerprintWebGLReadPixelsNoise);
-    if (!readpixels_noise.empty()) {
-      blink::FingerprintState::SetWebGLReadPixelsNoise(readpixels_noise !=
-                                                       "0");
+    if (!webgl_noise.empty()) {
+      blink::FingerprintState::SetWebGLNoise(webgl_noise != "0");
+    }
+    const std::string canvas_noise =
+        cmd_line->GetSwitchValueASCII(switches::kFingerprintCanvasNoise);
+    if (!canvas_noise.empty()) {
+      blink::FingerprintState::SetCanvasNoise(canvas_noise != "0");
+    }
+    int noise_version = 0;
+    if (base::StringToInt(
+            cmd_line->GetSwitchValueASCII(switches::kFingerprintNoiseVersion),
+            &noise_version)) {
+      blink::FingerprintState::SetNoiseVersion(noise_version);
     }
   }
 

@@ -126,6 +126,29 @@ std::string& WebGLExtensionsStorage() {
 }
 std::atomic<bool> g_webgl_extensions_set{false};
 
+std::string& WebGL1ExtensionsStorage() {
+  static base::NoDestructor<std::string> s;
+  return *s;
+}
+std::atomic<bool> g_webgl1_extensions_set{false};
+
+// Splits a '\n'-joined blob, skipping empty entries.
+std::vector<std::string> SplitNonEmptyLines(const std::string& blob) {
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos < blob.size()) {
+    size_t end = blob.find('\n', pos);
+    if (end == std::string::npos) {
+      end = blob.size();
+    }
+    if (end > pos) {
+      out.emplace_back(blob.substr(pos, end - pos));
+    }
+    pos = end + 1;
+  }
+  return out;
+}
+
 // Full WebGL parameter surface. Three parallel maps keyed by GLenum
 // (pname) cover the three value shapes WebGLRenderingContextBase's
 // getParameter switch returns: single int, int-range pair, float-range
@@ -172,7 +195,9 @@ uint64_t PrecisionKey(uint32_t shader_type, uint32_t precision_type) {
 
 // Legacy default: audio noise on at 1e-5 until the profile says otherwise.
 std::atomic<float> g_audio_noise_amplitude{1e-5f};
-std::atomic<bool> g_webgl_readpixels_noise{true};
+std::atomic<bool> g_webgl_noise{true};
+std::atomic<bool> g_canvas_noise{true};
+std::atomic<int> g_noise_version{1};
 
 // xxHash-style scalar mix. Cryptographically weak but plenty good for
 // distinguishing fingerprints. Deterministic for the same (seed, channel,
@@ -532,23 +557,33 @@ bool FingerprintState::HasWebGLExtensions() {
 
 // static
 std::vector<std::string> FingerprintState::WebGLExtensions() {
-  std::vector<std::string> out;
   if (!g_webgl_extensions_set.load(std::memory_order_acquire)) {
-    return out;
+    return {};
   }
-  const std::string& blob = WebGLExtensionsStorage();
-  size_t pos = 0;
-  while (pos < blob.size()) {
-    size_t end = blob.find('\n', pos);
-    if (end == std::string::npos) {
-      end = blob.size();
-    }
-    if (end > pos) {
-      out.emplace_back(blob.substr(pos, end - pos));
-    }
-    pos = end + 1;
+  return SplitNonEmptyLines(WebGLExtensionsStorage());
+}
+
+// static
+void FingerprintState::SetWebGL1Extensions(std::string_view newline_list) {
+  if (g_webgl1_extensions_set.load(std::memory_order_acquire) ||
+      newline_list.empty()) {
+    return;
   }
-  return out;
+  WebGL1ExtensionsStorage().assign(newline_list);
+  g_webgl1_extensions_set.store(true, std::memory_order_release);
+}
+
+// static
+bool FingerprintState::HasWebGL1Extensions() {
+  return g_webgl1_extensions_set.load(std::memory_order_acquire);
+}
+
+// static
+std::vector<std::string> FingerprintState::WebGL1Extensions() {
+  if (!g_webgl1_extensions_set.load(std::memory_order_acquire)) {
+    return {};
+  }
+  return SplitNonEmptyLines(WebGL1ExtensionsStorage());
 }
 
 // static
@@ -730,14 +765,71 @@ bool FingerprintState::AudioNoiseEnabled() {
 }
 
 // static
-void FingerprintState::SetWebGLReadPixelsNoise(bool enabled) {
-  g_webgl_readpixels_noise.store(enabled, std::memory_order_release);
+void FingerprintState::SetNoiseVersion(int version) {
+  g_noise_version.store(version > 0 ? version : 1, std::memory_order_release);
 }
 
 // static
-bool FingerprintState::WebGLReadPixelsNoiseEnabled() {
-  return IsActive() &&
-         g_webgl_readpixels_noise.load(std::memory_order_acquire);
+int FingerprintState::NoiseVersion() {
+  return g_noise_version.load(std::memory_order_acquire);
+}
+
+// static
+void FingerprintState::SetCanvasNoise(bool enabled) {
+  g_canvas_noise.store(enabled, std::memory_order_release);
+}
+
+// static
+bool FingerprintState::LegacyCanvasReadNoiseEnabled() {
+  return IsActive() && NoiseVersion() < 2 &&
+         g_canvas_noise.load(std::memory_order_acquire);
+}
+
+// static
+std::optional<std::pair<float, float>> FingerprintState::CanvasTextNoise() {
+  if (!IsActive() || NoiseVersion() < 2 ||
+      !g_canvas_noise.load(std::memory_order_acquire)) {
+    return std::nullopt;
+  }
+  // Measured on Chrome 148 / Windows: canvas glyphs snap to whole pixels
+  // vertically and to quarter pixels horizontally. A 0.25-0.45 px
+  // horizontal shift therefore always moves every glyph (short strings and
+  // emoji included), and a 0.15%-0.4% scale about the anchor varies longer
+  // strings continuously between profiles. Both are far below visible.
+  const uint32_t scale_hash = HashAt("canvas-text", 0u, 0u);
+  const float scale_magnitude =
+      1.5e-3f +
+      2.5e-3f * (static_cast<float>(scale_hash & 0xFFFFu) / 65535.0f);
+  const float scale = (scale_hash & 0x10000u) ? 1.0f + scale_magnitude
+                                              : 1.0f - scale_magnitude;
+  const uint32_t shift_hash = HashAt("canvas-text", 1u, 0u);
+  const float shift_magnitude =
+      0.25f + 0.2f * (static_cast<float>(shift_hash & 0xFFFFu) / 65535.0f);
+  const float shift =
+      (shift_hash & 0x10000u) ? shift_magnitude : -shift_magnitude;
+  return std::make_pair(scale, shift);
+}
+
+// static
+void FingerprintState::SetWebGLNoise(bool enabled) {
+  g_webgl_noise.store(enabled, std::memory_order_release);
+}
+
+// static
+std::optional<std::pair<float, float>> FingerprintState::WebGLVertexOffset() {
+  if (!IsActive() || NoiseVersion() < 2 ||
+      !g_webgl_noise.load(std::memory_order_acquire)) {
+    return std::nullopt;
+  }
+  // 2e-4..6e-4 in clip space, i.e. ~0.03-0.09 px on a 300 px canvas. Moves
+  // interpolated colours and anti-aliased edges; a clear stays untouched.
+  auto component = [](uint32_t axis) {
+    const uint32_t hash = HashAt("webgl-vertex", axis, 0u);
+    const float magnitude =
+        2e-4f + 4e-4f * (static_cast<float>(hash & 0xFFFFu) / 65535.0f);
+    return (hash & 0x10000u) ? magnitude : -magnitude;
+  };
+  return std::make_pair(component(0u), component(1u));
 }
 
 // static

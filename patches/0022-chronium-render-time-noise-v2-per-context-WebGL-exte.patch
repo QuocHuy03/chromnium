@@ -1,0 +1,1215 @@
+From d0d0124c16832703b6bc6743c0f0a48ec8d1d654 Mon Sep 17 00:00:00 2001
+From: Chronium <chronium@interlink.local>
+Date: Tue, 15 Sep 2026 13:48:28 +0700
+Subject: [PATCH] chronium: render-time noise v2, per-context WebGL extensions,
+ audio fix
+
+Engine Fix Notes (leak test 15/09/2026) A1, A2, A6, A7.
+
+noise.version (new, default 1). Version 1 keeps the legacy read-time
+canvas noise so profiles already signed in keep their hashes. Version 2
+perturbs at render time and never on read:
+- A6: canvas text is drawn with a seeded 0.25-0.45 px horizontal shift
+  and 0.15-0.4% scale about its anchor
+  (BaseRenderingContext2D::DrawTextInternal, shared by OffscreenCanvas).
+  Chrome 148 snaps glyphs to quarter pixels horizontally, so the shift
+  always changes short strings and emoji; the scale varies long strings.
+  Flat fills and putImageData round-trips stay exact, and getImageData,
+  toDataURL and toBlob read the same bitmap. Legacy LSB noise in
+  getImageData / toDataURL / toBlob is off in version 2.
+- A1: vertex shaders get a seeded 2e-4..6e-4 clip-space offset on
+  gl_Position.xy (shaderSource rewrite: #define main + #line + appended
+  wrapper; getShaderSource returns the original). readPixels, toDataURL
+  and drawImage agree; a clear or flat quad is untouched. #line keeps
+  compile-error line numbers (checked on ANGLE, ESSL 1.00 and 3.00).
+- noise.canvas_threshold = 0 now turns canvas noise off (both schemes);
+  noise.webgl_readpixels toggles the WebGL noise.
+
+A7: getSupportedExtensions() filters the real list through a per-context
+allowlist (webgl.extensions for WebGL2, new webgl.extensions_webgl1 for
+WebGL1; no list = real list), and getExtension() applies the same
+allowlist, so listed == resolvable on both context types.
+
+A2: audio noise moved from read time (AudioBuffer::getChannelData) to a
+single pass in OfflineAudioContext::FireCompletionEvent, so
+getChannelData == copyFromChannel and script-written buffers (CreepJS
+trap) stay exact. noise.audio_amplitude is now the real amplitude
+(clamped to [0, 1e-2]); AnalyserNode readouts scale with it and leave
+silence untouched.
+
+New switches: --fingerprint-webgl1-extensions, --fingerprint-noise-version,
+--fingerprint-canvas-noise, --fingerprint-webgl-readpixels-noise.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ .../browser/chrome_content_browser_client.cc  |  21 +++
+ .../fingerprint/fingerprint_profile.cc        |  85 +++++++--
+ .../browser/fingerprint/fingerprint_profile.h |  19 +-
+ chrome/common/chrome_switches.cc              |   5 +
+ chrome/common/chrome_switches.h               |  25 ++-
+ .../chrome_content_renderer_client.cc         |  33 +++-
+ .../core/html/canvas/html_canvas_element.cc   |   5 +-
+ .../canvas2d/base_rendering_context_2d.cc     |  29 ++-
+ .../modules/webaudio/analyser_node.cc         |  80 ++++++---
+ .../renderer/modules/webaudio/audio_buffer.cc |  34 +---
+ .../renderer/modules/webaudio/audio_buffer.h  |   5 -
+ .../modules/webaudio/offline_audio_context.cc |  36 ++++
+ .../webgl/webgl_rendering_context_base.cc     | 167 +++++++++++++++---
+ .../platform/fingerprint/fingerprint_state.cc | 155 +++++++++++++---
+ .../platform/fingerprint/fingerprint_state.h  |  51 +++++-
+ 15 files changed, 616 insertions(+), 134 deletions(-)
+
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 9c4ff4f..8259d68 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -2903,6 +2903,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+             switches::kFingerprintWebGLExtensions,
+             base::HexEncode(base::as_byte_span(webgl_exts)));
+       }
++      const std::string webgl1_exts = fp->WebGL1ExtensionsBlob();
++      if (!webgl1_exts.empty()) {
++        command_line->AppendSwitchASCII(
++            switches::kFingerprintWebGL1Extensions,
++            base::HexEncode(base::as_byte_span(webgl1_exts)));
++      }
+       const std::string webgl_params = fp->WebGLParamsBlob();
+       if (!webgl_params.empty()) {
+         // Hex-encode for the same argv-tab/newline reason. Renderer
+@@ -2916,6 +2922,21 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+         command_line->AppendSwitchASCII(switches::kFingerprintAudioNoise,
+                                         audio_noise);
+       }
++      const std::string readpixels_noise = fp->WebGLReadPixelsNoiseValue();
++      if (!readpixels_noise.empty()) {
++        command_line->AppendSwitchASCII(
++            switches::kFingerprintWebGLReadPixelsNoise, readpixels_noise);
++      }
++      const std::string noise_version = fp->NoiseVersionValue();
++      if (!noise_version.empty()) {
++        command_line->AppendSwitchASCII(switches::kFingerprintNoiseVersion,
++                                        noise_version);
++      }
++      const std::string canvas_noise = fp->CanvasNoiseValue();
++      if (!canvas_noise.empty()) {
++        command_line->AppendSwitchASCII(switches::kFingerprintCanvasNoise,
++                                        canvas_noise);
++      }
+       // Chronium: explicitly propagate the profile locale to children
+       // via --lang. Renderer's ICU initialization reads this switch
+       // BEFORE V8 wires up Intl, so Intl.DateTimeFormat().resolvedOptions()
+diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
+index eb50293..f2bff04 100644
+--- a/chrome/browser/fingerprint/fingerprint_profile.cc
++++ b/chrome/browser/fingerprint/fingerprint_profile.cc
+@@ -417,20 +417,21 @@ std::string FingerprintProfile::WebAuthnUvpaValue() const {
+   return *u ? "1" : "0";
+ }
+ 
+-std::string FingerprintProfile::WebGLExtensionsBlob() const {
+-  if (!loaded_) {
+-    return {};
+-  }
+-  const base::DictValue* webgl = dict_.FindDict("webgl");
++namespace {
++
++// The non-empty strings of `webgl.<key>` joined by '\n'; empty when unset.
++std::string JoinedWebGLStringList(const base::DictValue& root,
++                                  std::string_view key) {
++  const base::DictValue* webgl = root.FindDict("webgl");
+   if (!webgl) {
+     return {};
+   }
+-  const base::ListValue* exts = webgl->FindList("extensions");
+-  if (!exts || exts->empty()) {
++  const base::ListValue* list = webgl->FindList(key);
++  if (!list || list->empty()) {
+     return {};
+   }
+   std::string out;
+-  for (const auto& item : *exts) {
++  for (const auto& item : *list) {
+     const std::string* s = item.GetIfString();
+     if (!s || s->empty()) {
+       continue;
+@@ -443,6 +444,22 @@ std::string FingerprintProfile::WebGLExtensionsBlob() const {
+   return out;
+ }
+ 
++}  // namespace
++
++std::string FingerprintProfile::WebGLExtensionsBlob() const {
++  if (!loaded_) {
++    return {};
++  }
++  return JoinedWebGLStringList(dict_, "extensions");
++}
++
++std::string FingerprintProfile::WebGL1ExtensionsBlob() const {
++  if (!loaded_) {
++    return {};
++  }
++  return JoinedWebGLStringList(dict_, "extensions_webgl1");
++}
++
+ std::string FingerprintProfile::WebGLParamsBlob() const {
+   // Build a TSV blob the renderer's FingerprintState::SetWebGLParams
+   // parser consumes. Read both `webgl.params` (a dict keyed by GLenum
+@@ -525,14 +542,58 @@ std::string FingerprintProfile::AudioNoiseValue() const {
+   if (!noise) {
+     return {};
+   }
+-  // The profile JSON exposes audio_amplitude as the scale; treat 0 or
+-  // negative as "noise disabled". Anything > 0 keeps the legacy noised
+-  // path active.
++  // The renderer parses this as the relative gain-jitter amplitude
++  // (FingerprintState::SetAudioNoiseAmplitude); 0 or negative disables.
+   std::optional<double> amp = noise->FindDouble("audio_amplitude");
+   if (!amp.has_value()) {
+     return {};
+   }
+-  return *amp > 0.0 ? "1" : "0";
++  return *amp > 0.0 ? base::NumberToString(*amp) : "0";
++}
++
++std::string FingerprintProfile::WebGLReadPixelsNoiseValue() const {
++  if (!loaded_) {
++    return {};
++  }
++  const base::DictValue* noise = dict_.FindDict("noise");
++  if (!noise) {
++    return {};
++  }
++  std::optional<bool> enabled = noise->FindBool("webgl_readpixels");
++  if (!enabled.has_value()) {
++    return {};
++  }
++  return *enabled ? "1" : "0";
++}
++
++std::string FingerprintProfile::NoiseVersionValue() const {
++  if (!loaded_) {
++    return {};
++  }
++  const base::DictValue* noise = dict_.FindDict("noise");
++  if (!noise) {
++    return {};
++  }
++  std::optional<int> version = noise->FindInt("version");
++  if (!version.has_value() || *version <= 0) {
++    return {};
++  }
++  return base::NumberToString(*version);
++}
++
++std::string FingerprintProfile::CanvasNoiseValue() const {
++  if (!loaded_) {
++    return {};
++  }
++  const base::DictValue* noise = dict_.FindDict("noise");
++  if (!noise) {
++    return {};
++  }
++  std::optional<double> threshold = noise->FindDouble("canvas_threshold");
++  if (!threshold.has_value()) {
++    return {};
++  }
++  return *threshold > 0.0 ? "1" : "0";
+ }
+ 
+ bool FingerprintProfile::LoadFromFile(const base::FilePath& path) {
+diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
+index 81803da..24e0f96 100644
+--- a/chrome/browser/fingerprint/fingerprint_profile.h
++++ b/chrome/browser/fingerprint/fingerprint_profile.h
+@@ -132,6 +132,8 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
+   // WebGL getSupportedExtensions() list joined by '\n'. Empty = no
+   // override.
+   std::string WebGLExtensionsBlob() const;
++  // Same for webgl.extensions_webgl1 (the WebGL1 list). Empty when unset.
++  std::string WebGL1ExtensionsBlob() const;
+ 
+   // WebGL getParameter() + getShaderPrecisionFormat() override. Built
+   // from `webgl.params` (single ints / int-ranges / float-ranges) and
+@@ -141,11 +143,22 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
+   // when neither key is set in the profile.
+   std::string WebGLParamsBlob() const;
+ 
+-  // AudioContext sample-noise enable. "1" = enabled (legacy), "0" =
+-  // disabled. Empty when the profile doesn't explicitly set it (then
+-  // the renderer keeps the historical default of enabled).
++  // noise.audio_amplitude as a decimal string (e.g. "1e-05"); "0" when
++  // disabled. Empty when the profile doesn't set it (the renderer then
++  // keeps the legacy default amplitude of 1e-5).
+   std::string AudioNoiseValue() const;
+ 
++  // noise.webgl_readpixels (WebGL pixel noise): "1" / "0". Empty when the
++  // profile doesn't set it (the renderer default is enabled).
++  std::string WebGLReadPixelsNoiseValue() const;
++
++  // noise.version as a decimal string. Empty when unset (legacy scheme 1).
++  std::string NoiseVersionValue() const;
++
++  // noise.canvas_threshold: "0" when <= 0 (canvas noise off), else "1".
++  // Empty when unset (the renderer default is enabled).
++  std::string CanvasNoiseValue() const;
++
+  private:
+   friend class base::NoDestructor<FingerprintProfile>;
+   FingerprintProfile();
+diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
+index 89d305a..735554d 100644
+--- a/chrome/common/chrome_switches.cc
++++ b/chrome/common/chrome_switches.cc
+@@ -379,6 +379,11 @@ const char kFingerprintWebAuthnUvpa[] = "fingerprint-webauthn-uvpa";
+ const char kFingerprintWebGLExtensions[] = "fingerprint-webgl-extensions";
+ const char kFingerprintWebGLParams[] = "fingerprint-webgl-params";
+ const char kFingerprintAudioNoise[] = "fingerprint-audio-noise";
++const char kFingerprintWebGLReadPixelsNoise[] =
++    "fingerprint-webgl-readpixels-noise";
++const char kFingerprintWebGL1Extensions[] = "fingerprint-webgl1-extensions";
++const char kFingerprintNoiseVersion[] = "fingerprint-noise-version";
++const char kFingerprintCanvasNoise[] = "fingerprint-canvas-noise";
+ const char kLicenseTs[]    = "license-ts";
+ const char kLicenseNonce[] = "license-nonce";
+ const char kLicenseToken[] = "license-token";
+diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
+index 9625bb6..419b89d 100644
+--- a/chrome/common/chrome_switches.h
++++ b/chrome/common/chrome_switches.h
+@@ -197,11 +197,14 @@ extern const char kFingerprintSpeechVoices[];
+ // override. "0" = force false, "1" = force true, absent = no override.
+ extern const char kFingerprintWebAuthnUvpa[];
+ 
+-// Chronium (internal): WebGL getSupportedExtensions() override. List of
++// Chronium (internal): WebGL2 getSupportedExtensions() allowlist. List of
+ // extension names joined by '\n' and hex-encoded over the CLI to dodge
+ // argv-splitting on whitespace.
+ extern const char kFingerprintWebGLExtensions[];
+ 
++// Chronium (internal): same for WebGL1 contexts (webgl.extensions_webgl1).
++extern const char kFingerprintWebGL1Extensions[];
++
+ // Chronium (internal): WebGL getParameter() + getShaderPrecisionFormat()
+ // surface override. TSV blob (hex-encoded; same encoding rationale as
+ // the extension list above) where every line is one of:
+@@ -230,12 +233,24 @@ extern const char kLicenseToken[];
+ // Empty / absent = no chip rendered (vanilla LocationBarView).
+ extern const char kAccountLabel[];
+ 
+-// Chronium (internal): AudioContext sample noise toggle. "0" = disable,
+-// "1" = enable. Absent = enabled (legacy default). Set "0" when the
+-// profile pins a real-but-vanilla device that anti-bot traps would
+-// flag the noised samples on (creepjs / iphey).
++// Chronium (internal): audio noise amplitude from noise.audio_amplitude,
++// as a decimal string. "0" = disabled. Absent = legacy default (1e-5).
++// Applied once to OfflineAudioContext render output and to AnalyserNode
++// readouts; script-created AudioBuffers are never perturbed.
+ extern const char kFingerprintAudioNoise[];
+ 
++// Chronium (internal): WebGL pixel noise toggle from
++// noise.webgl_readpixels. "0" = disable, "1" = enable. Absent = enabled.
++extern const char kFingerprintWebGLReadPixelsNoise[];
++
++// Chronium (internal): noise scheme from noise.version ("1" legacy
++// read-time, "2" render-time). Absent = 1.
++extern const char kFingerprintNoiseVersion[];
++
++// Chronium (internal): canvas noise toggle from noise.canvas_threshold.
++// "0" = disable, "1" = enable. Absent = enabled.
++extern const char kFingerprintCanvasNoise[];
++
+ extern const char kHideCrashRestoreBubble[];
+ extern const char kHomePage[];
+ #if !BUILDFLAG(IS_ANDROID)
+diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
+index 93671af..04d52ae 100644
+--- a/chrome/renderer/chrome_content_renderer_client.cc
++++ b/chrome/renderer/chrome_content_renderer_client.cc
+@@ -563,6 +563,16 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+         blink::FingerprintState::SetWebGLExtensions(exts_blob);
+       }
+     }
++    const std::string webgl1_exts_hex =
++        cmd_line->GetSwitchValueASCII(switches::kFingerprintWebGL1Extensions);
++    if (!webgl1_exts_hex.empty()) {
++      std::vector<uint8_t> bytes;
++      if (base::HexStringToBytes(webgl1_exts_hex, &bytes) && !bytes.empty()) {
++        std::string_view exts_blob(
++            reinterpret_cast<const char*>(bytes.data()), bytes.size());
++        blink::FingerprintState::SetWebGL1Extensions(exts_blob);
++      }
++    }
+     const std::string webgl_params_hex =
+         cmd_line->GetSwitchValueASCII(switches::kFingerprintWebGLParams);
+     if (!webgl_params_hex.empty()) {
+@@ -575,8 +585,27 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+     }
+     const std::string audio_noise =
+         cmd_line->GetSwitchValueASCII(switches::kFingerprintAudioNoise);
+-    if (!audio_noise.empty()) {
+-      blink::FingerprintState::SetAudioNoise(audio_noise != "0");
++    double audio_amplitude = 0.0;
++    if (!audio_noise.empty() &&
++        base::StringToDouble(audio_noise, &audio_amplitude)) {
++      blink::FingerprintState::SetAudioNoiseAmplitude(
++          static_cast<float>(audio_amplitude));
++    }
++    const std::string webgl_noise = cmd_line->GetSwitchValueASCII(
++        switches::kFingerprintWebGLReadPixelsNoise);
++    if (!webgl_noise.empty()) {
++      blink::FingerprintState::SetWebGLNoise(webgl_noise != "0");
++    }
++    const std::string canvas_noise =
++        cmd_line->GetSwitchValueASCII(switches::kFingerprintCanvasNoise);
++    if (!canvas_noise.empty()) {
++      blink::FingerprintState::SetCanvasNoise(canvas_noise != "0");
++    }
++    int noise_version = 0;
++    if (base::StringToInt(
++            cmd_line->GetSwitchValueASCII(switches::kFingerprintNoiseVersion),
++            &noise_version)) {
++      blink::FingerprintState::SetNoiseVersion(noise_version);
+     }
+   }
+ 
+diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+index 31f0770..369e0cb 100644
+--- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
++++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+@@ -147,10 +147,11 @@ namespace {
+ // new StaticBitmapImage where ~0.4% of pixels have one RGB channel's LSB
+ // flipped (deterministic for the same fingerprint profile, different
+ // across profiles). Returns |input| unchanged when FingerprintState is
+-// inactive or the bitmap cannot be read.
++// inactive or the bitmap cannot be read. Legacy scheme only (noise.version
++// 1): version 2 perturbs at draw time, so exports need nothing here.
+ scoped_refptr<StaticBitmapImage> ApplyCanvasFingerprintNoise(
+     scoped_refptr<StaticBitmapImage> input) {
+-  if (!input || !FingerprintState::IsActive()) {
++  if (!input || !FingerprintState::LegacyCanvasReadNoiseEnabled()) {
+     return input;
+   }
+   PaintImage paint_image = input->PaintImageForCurrentFrame();
+diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
+index 6f73b8f..b2e8134 100644
+--- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
++++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
+@@ -532,7 +532,7 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+       SkIRect bounds =
+           snapshot->PaintImageForCurrentFrame().GetSkImageInfo().bounds();
+       DCHECK(!bounds.intersect(SkIRect::MakeXYWH(sx, sy, sw, sh)));
+-    } else if (FingerprintState::IsActive() &&
++    } else if (FingerprintState::LegacyCanvasReadNoiseEnabled() &&
+                image_data_pixmap.info().bytesPerPixel() == 4 &&
+                image_data_pixmap.writable_addr() != nullptr) {
+       // Chronium: per-profile seeded noise on the returned pixel buffer.
+@@ -1128,6 +1128,19 @@ void BaseRenderingContext2D::DrawTextInternal(
+     InflateStrokeRect(bounds);
+   }
+ 
++  // Chronium (noise.version 2): draw the text with a seeded sub-pixel shift
++  // and scale about its anchor instead of perturbing pixels on read. Flat
++  // fills and putImageData round-trips stay exact, and getImageData /
++  // toDataURL / toBlob all read the same bitmap. Outset the bounds so damage
++  // tracking covers the (sub-pixel) movement.
++  const std::optional<std::pair<float, float>> text_noise =
++      FingerprintState::CanvasTextNoise();
++  if (text_noise) {
++    bounds.Outset((bounds.width() + bounds.height()) *
++                      std::abs(text_noise->first - 1.0f) +
++                  std::abs(text_noise->second) + 1.0f);
++  }
++
+   if (use_max_width) {
+     paint_canvas->save();
+     // We draw when fontWidth is 0 so compositing operations (eg, a "copy" op)
+@@ -1141,8 +1154,9 @@ void BaseRenderingContext2D::DrawTextInternal(
+   Draw<OverdrawOp::kNone>(
+       /*draw_func=*/
+       [font, text = std::move(text), direction, bidi_override, location,
+-       run_start, run_end, canvas, &text_painter](MemoryManagedPaintCanvas* c,
+-                                                  const cc::PaintFlags* flags) {
++       run_start, run_end, canvas, text_noise,
++       &text_painter](MemoryManagedPaintCanvas* c,
++                      const cc::PaintFlags* flags) {
+         TextRun text_run(text, direction, bidi_override);
+         // Font::DrawType::kGlyphsAndClusters is required for printing to PDF,
+         // otherwise the character to glyph mapping will not be reversible,
+@@ -1156,9 +1170,18 @@ void BaseRenderingContext2D::DrawTextInternal(
+         Font::DrawType draw_type = (canvas && canvas->IsPrinting())
+                                        ? Font::DrawType::kGlyphsAndClusters
+                                        : Font::DrawType::kGlyphsOnly;
++        if (text_noise) {
++          c->save();
++          c->translate(location.x() + text_noise->second, location.y());
++          c->scale(text_noise->first, text_noise->first);
++          c->translate(-location.x(), -location.y());
++        }
+         text_painter.DrawWithBidiReorder(text_run, run_start, run_end, *font,
+                                          Font::kUseFallbackIfFontNotReady, *c,
+                                          location, *flags, draw_type);
++        if (text_noise) {
++          c->restore();
++        }
+       },
+       NoOverdraw, bounds, paint_type, CanvasRenderingContext2DState::kNoImage,
+       CanvasPerformanceMonitor::DrawType::kText);
+diff --git a/third_party/blink/renderer/modules/webaudio/analyser_node.cc b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
+index 4acd8a7..eaca14a 100644
+--- a/third_party/blink/renderer/modules/webaudio/analyser_node.cc
++++ b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
+@@ -25,6 +25,9 @@
+ 
+ #include "third_party/blink/renderer/modules/webaudio/analyser_node.h"
+ 
++#include <cmath>
++
++#include "base/containers/span.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_analyser_options.h"
+ #include "third_party/blink/renderer/modules/webaudio/analyser_handler.h"
+ #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
+@@ -119,40 +122,67 @@ double AnalyserNode::smoothingTimeConstant() const {
+ 
+ // Chronium: applies seeded sub-perceptible noise to the user-supplied
+ // AnalyserNode output buffer. The buffer is written by the analyser
+-// handler then perturbed here, so every call sees a perturbed value but
+-// the perturbation is deterministic per (profile, channel, index).
++// handler then perturbed here; the perturbation is deterministic per
++// (profile, channel, index), scaled by noise.audio_amplitude, and off
++// when the amplitude is 0. Silence is never perturbed.
+ namespace {
+ 
+-void NoiseFloatBuffer(DOMFloat32Array* array, const char* channel_name) {
+-  if (!array || !FingerprintState::IsActive()) {
++float SignedUnit(uint32_t hash) {
++  return (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
++}
++
++// Frequency data is in dB (typically -100..0). At the legacy amplitude
++// (1e-5) this is the historical 1e-4 dB shift. -Infinity bins stay as-is.
++void NoiseFrequencyBuffer(DOMFloat32Array* array, const char* channel_name) {
++  if (!array || !FingerprintState::AudioNoiseEnabled()) {
+     return;
+   }
+-  float* data = array->Data();
+-  const unsigned len = array->length();
+-  for (unsigned i = 0; i < len; ++i) {
+-    const uint32_t hash = FingerprintState::HashAt(channel_name, 0u, i);
+-    const float signed_unit =
+-        (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
+-    // Frequency data is in dB (typically -100..0). A 1e-4 perturbation
+-    // shifts the hash without crossing rounding/quantization boundaries
+-    // a fingerprinter would expect to be stable across runs of the same
+-    // profile.
+-    UNSAFE_TODO(data[i] += signed_unit * 1e-4f);
++  const float scale = FingerprintState::AudioNoiseAmplitude() * 10.0f;
++  base::span<float> data = array->AsSpan();
++  for (size_t i = 0; i < data.size(); ++i) {
++    if (!std::isfinite(data[i])) {
++      continue;
++    }
++    data[i] += SignedUnit(FingerprintState::HashAt(
++                   channel_name, 0u, static_cast<uint32_t>(i))) *
++               scale;
++  }
++}
++
++// Time-domain samples get the same relative gain jitter as rendered
++// AudioBuffers; exact zeros stay zero.
++void NoiseTimeDomainBuffer(DOMFloat32Array* array, const char* channel_name) {
++  if (!array || !FingerprintState::AudioNoiseEnabled()) {
++    return;
++  }
++  const float amplitude = FingerprintState::AudioNoiseAmplitude();
++  base::span<float> data = array->AsSpan();
++  for (size_t i = 0; i < data.size(); ++i) {
++    if (data[i] == 0.0f) {
++      continue;
++    }
++    data[i] *= 1.0f + SignedUnit(FingerprintState::HashAt(
++                          channel_name, 0u, static_cast<uint32_t>(i))) *
++                          amplitude;
+   }
+ }
+ 
+ void NoiseByteBuffer(DOMUint8Array* array, const char* channel_name) {
+-  if (!array || !FingerprintState::IsActive()) {
++  if (!array || !FingerprintState::AudioNoiseEnabled()) {
+     return;
+   }
+-  uint8_t* data = array->Data();
+-  const unsigned len = array->length();
+-  for (unsigned i = 0; i < len; ++i) {
+-    const uint32_t hash = FingerprintState::HashAt(channel_name, 0u, i);
+-    // Flip LSB of ~1/256 entries; keeps the buffer visually identical for
+-    // any reasonable consumer but changes the fingerprint hash.
++  base::span<uint8_t> data = array->AsSpan();
++  for (size_t i = 0; i < data.size(); ++i) {
++    // 0 / 255 (frequency floor / ceiling) and 128 (time-domain centre) are
++    // what silence reads as; flipping them would expose the noise.
++    if (data[i] == 0u || data[i] == 128u || data[i] == 255u) {
++      continue;
++    }
++    const uint32_t hash =
++        FingerprintState::HashAt(channel_name, 0u, static_cast<uint32_t>(i));
++    // Flip LSB of ~1/256 entries.
+     if ((hash & 0xFFu) == 0u) {
+-      UNSAFE_TODO(data[i] ^= 1u);
++      data[i] ^= 1u;
+     }
+   }
+ }
+@@ -162,7 +192,7 @@ void NoiseByteBuffer(DOMUint8Array* array, const char* channel_name) {
+ void AnalyserNode::getFloatFrequencyData(NotShared<DOMFloat32Array> array) {
+   GetAnalyserHandler().GetFloatFrequencyData(array.Get(),
+                                              context()->currentTime());
+-  NoiseFloatBuffer(array.Get(), "audio-freq-f");
++  NoiseFrequencyBuffer(array.Get(), "audio-freq-f");
+ }
+ 
+ void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
+@@ -173,7 +203,7 @@ void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
+ 
+ void AnalyserNode::getFloatTimeDomainData(NotShared<DOMFloat32Array> array) {
+   GetAnalyserHandler().GetFloatTimeDomainData(array.Get());
+-  NoiseFloatBuffer(array.Get(), "audio-time-f");
++  NoiseTimeDomainBuffer(array.Get(), "audio-time-f");
+ }
+ 
+ void AnalyserNode::getByteTimeDomainData(NotShared<DOMUint8Array> array) {
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
+index a805f14..7bf4c25 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
++++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
+@@ -38,7 +38,6 @@
+ #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+-#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
+ #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+ 
+ namespace blink {
+@@ -210,35 +209,10 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
+     return NotShared<DOMFloat32Array>(nullptr);
+   }
+ 
+-  // Chronium: apply seeded sub-perceptible noise on the FIRST JS-facing
+-  // read of each channel. We hook the (unsigned, ExceptionState&) entry
+-  // point — not the internal (unsigned) one — because internal C++ paths
+-  // (e.g. SharedAudioBuffer ctor) call this *before* the audio render
+-  // thread has written into the buffer; noising there would be overwritten.
+-  // By the time JS observes the buffer, rendering is complete and this
+-  // hook is the right place.
+-  if (FingerprintState::IsActive() && channel_index < 32u) {
+-    const uint32_t bit = 1u << channel_index;
+-    if ((noised_channel_mask_ & bit) == 0u) {
+-      DOMFloat32Array* arr = channels_[channel_index].Get();
+-      if (arr) {
+-        float* data = arr->Data();
+-        const unsigned len = arr->length();
+-        for (unsigned i = 0; i < len; ++i) {
+-          const uint32_t hash =
+-              FingerprintState::HashAt("audio", channel_index, i);
+-          // Signed unit in roughly [-1, +1]; scale by 1e-5 (~-100 dB,
+-          // inaudible) which is above float32's ~1.2e-7 relative epsilon
+-          // so the change survives the multiply.
+-          const float signed_unit =
+-              (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
+-          UNSAFE_TODO(data[i] *= 1.0f + signed_unit * 1e-5f);
+-        }
+-        noised_channel_mask_ |= bit;
+-      }
+-    }
+-  }
+-
++  // Chronium: no read-time noise here. Audio fingerprint noise is applied
++  // once to the rendered buffer in OfflineAudioContext::FireCompletionEvent,
++  // so every read path sees the same samples and script-written buffers
++  // read back exactly what was written.
+   return getChannelData(channel_index);
+ }
+ 
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.h b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
+index b65558e..2e798e3 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_buffer.h
++++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
+@@ -127,11 +127,6 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
+   uint32_t length_;
+ 
+   HeapVector<Member<DOMFloat32Array>> channels_;
+-
+-  // Chronium: bitmask of channels that have already had fingerprint noise
+-  // applied. Ensures the multiplier is applied at most once per channel
+-  // so repeated getChannelData reads return a stable buffer.
+-  uint32_t noised_channel_mask_ = 0;
+ };
+ 
+ // Shared data that audio threads can hold onto.
+diff --git a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
+index 626582e..9c1648c 100644
+--- a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
++++ b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
+@@ -35,6 +35,7 @@
+ #include "third_party/blink/renderer/core/dom/dom_exception.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
++#include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
+ #include "third_party/blink/renderer/modules/webaudio/audio_listener.h"
+ #include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
+ #include "third_party/blink/renderer/modules/webaudio/offline_audio_completion_event.h"
+@@ -43,6 +44,7 @@
+ #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+ #include "third_party/blink/renderer/platform/bindings/script_state.h"
++#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+ #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+ #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+@@ -398,6 +400,38 @@ ScriptPromise<IDLUndefined> OfflineAudioContext::resumeContext(
+   return ToResolvedUndefinedPromise(script_state);
+ }
+ 
++namespace {
++
++// Chronium: applies the per-profile audio fingerprint noise to the rendered
++// buffer exactly once, in place, before script can observe it. Every read
++// path (getChannelData, copyFromChannel) then sees the same samples, and
++// AudioBuffers created and filled by script are never touched.
++void ApplyAudioFingerprintNoise(AudioBuffer* buffer) {
++  if (!FingerprintState::AudioNoiseEnabled()) {
++    return;
++  }
++  const float amplitude = FingerprintState::AudioNoiseAmplitude();
++  for (unsigned c = 0; c < buffer->numberOfChannels(); ++c) {
++    NotShared<DOMFloat32Array> channel = buffer->getChannelData(c);
++    if (!channel) {
++      continue;
++    }
++    base::span<float> samples = channel->AsSpan();
++    for (size_t i = 0; i < samples.size(); ++i) {
++      if (samples[i] == 0.0f) {
++        continue;  // Keep digital silence exact.
++      }
++      const uint32_t hash =
++          FingerprintState::HashAt("audio", c, static_cast<uint32_t>(i));
++      const float signed_unit =
++          (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
++      samples[i] *= 1.0f + signed_unit * amplitude;
++    }
++  }
++}
++
++}  // namespace
++
+ void OfflineAudioContext::FireCompletionEvent() {
+   DCHECK(IsMainThread());
+ 
+@@ -419,6 +453,8 @@ void OfflineAudioContext::FireCompletionEvent() {
+       return;
+     }
+ 
++    ApplyAudioFingerprintNoise(rendered_buffer);
++
+     // Call the offline rendering completion event listener and resolve the
+     // promise too.
+     DispatchEvent(*OfflineAudioCompletionEvent::Create(rendered_buffer));
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index e13d6bd..399139d 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -25,7 +25,9 @@
+ 
+ #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+ 
++#include <algorithm>
+ #include <memory>
++#include <string>
+ #include <utility>
+ 
+ #include "base/bit_cast.h"
+@@ -37,6 +39,11 @@
+ #include "base/metrics/histogram_macros.h"
+ #include "base/notimplemented.h"
+ #include "base/numerics/checked_math.h"
++#include "base/numerics/safe_conversions.h"
++#include "base/strings/strcat.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
+ #include "base/synchronization/lock.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/trace_event/trace_event.h"
+@@ -3670,6 +3677,39 @@ bool WebGLRenderingContextBase::TimerQueryExtensionsEnabled() {
+               .IsWorkaroundEnabled(gpu::ENABLE_WEBGL_TIMER_QUERY_EXTENSIONS));
+ }
+ 
++namespace {
++
++// Chronium: the profile's extension allowlist for this context type
++// (webgl.extensions for WebGL2, webgl.extensions_webgl1 for WebGL1), or
++// nullopt when the profile has none and the real extension set applies.
++std::optional<std::vector<std::string>> ProfileExtensionAllowlist(
++    bool webgl2) {
++  if (webgl2) {
++    if (!FingerprintState::HasWebGLExtensions()) {
++      return std::nullopt;
++    }
++    return FingerprintState::WebGLExtensions();
++  }
++  if (!FingerprintState::HasWebGL1Extensions()) {
++    return std::nullopt;
++  }
++  return FingerprintState::WebGL1Extensions();
++}
++
++// Extension names are matched case-insensitively, like getExtension().
++bool AllowlistContains(const std::vector<std::string>& allowlist,
++                       const String& name) {
++  if (!name.ContainsOnlyAsciiOrEmpty()) {
++    return false;
++  }
++  const std::string ascii_name = name.Ascii();
++  return std::ranges::any_of(allowlist, [&](const std::string& entry) {
++    return base::EqualsCaseInsensitiveASCII(entry, ascii_name);
++  });
++}
++
++}  // namespace
++
+ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
+                                                      const String& name) {
+   ExecutionContext* context = ExecutionContext::From(script_state);
+@@ -3678,7 +3718,15 @@ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
+     UseCounter::Count(context, WebFeature::kWebGLDebugRendererInfo);
+   }
+ 
+-  WebGLExtension* extension = EnableExtensionIfSupported(name, context);
++  // Chronium: a name the allowlist hides from getSupportedExtensions() must
++  // not resolve here either, or the two disagree (BrowserScan "WebGL
++  // exception").
++  const std::optional<std::vector<std::string>> allowlist =
++      ProfileExtensionAllowlist(IsWebGL2());
++  WebGLExtension* extension =
++      (!allowlist || AllowlistContains(*allowlist, name))
++          ? EnableExtensionIfSupported(name, context)
++          : nullptr;
+   return ScriptObject(
+       script_state->GetIsolate(),
+       ToV8Traits<IDLNullable<WebGLExtension>>::ToV8(script_state, extension));
+@@ -4380,26 +4428,21 @@ WebGLRenderingContextBase::getSupportedExtensions() {
+   if (isContextLost())
+     return std::nullopt;
+ 
+-  // Chronium: when the profile pins a list, return exactly that. The
+-  // real driver extension set leaks the underlying GPU (ANGLE on D3D11
+-  // vs Metal vs Vulkan) — bots that spoof unmasked_renderer but leave
+-  // this untouched still get caught by anti-detect tooling that
+-  // cross-checks "claims macOS Metal but reports
+-  // ANGLE_provoking_vertex_compatibility (a D3D-only ext)". Returning
+-  // the canned list keeps every WebGL surface coherent with the
+-  // claimed GPU.
+-  if (FingerprintState::HasWebGLExtensions()) {
+-    Vector<String> result;
+-    for (const auto& name : FingerprintState::WebGLExtensions()) {
+-      result.push_back(String::FromUtf8(name));
+-    }
+-    return result;
+-  }
+-
++  // Chronium: filter the real list through the profile allowlist for this
++  // context type (WebGL1 and WebGL2 expose different sets). Names this GPU
++  // can't back are dropped, and getExtension() applies the same allowlist,
++  // so the list always equals the set of names getExtension() resolves.
++  // Returning the canned list verbatim broke that (13 listed-but-null and
++  // 16 hidden-but-available names on WebGL1). Order stays the real
++  // registration order, as in stock Chrome.
++  const std::optional<std::vector<std::string>> allowlist =
++      ProfileExtensionAllowlist(IsWebGL2());
+   Vector<String> result;
+ 
+   for (ExtensionTracker* tracker : extensions_) {
+-    if (ExtensionSupportedAndAllowed(tracker)) {
++    if (ExtensionSupportedAndAllowed(tracker) &&
++        (!allowlist ||
++         AllowlistContains(*allowlist, tracker->ExtensionName()))) {
+       result.push_back(tracker->ExtensionName());
+     }
+   }
+@@ -5331,6 +5374,79 @@ void WebGLRenderingContextBase::scissor(GLint x,
+   ContextGL()->Scissor(x, y, width, height);
+ }
+ 
++namespace {
++
++// Chronium (noise.version 2): rewrites a vertex shader so gl_Position.xy
++// gets a seeded sub-pixel clip-space offset. WebGL pixels then differ per
++// profile at render time, so readPixels, toDataURL, toBlob and drawImage
++// all agree and a clear stays exact. The page's main() is renamed with a
++// #define and called from an appended main(). A #line directive after the
++// inserted line restores the page's own numbering, so compile-error logs
++// are unchanged (measured on Chrome 148 ANGLE for ESSL 1.00 and 3.00).
++std::string AddVertexOffset(const std::string& source, float dx, float dy) {
++  static constexpr char kInnerMain[] = "main_vs0";
++  const std::string_view src(source);
++
++  // #version, if present, must stay the first directive.
++  size_t body_start = 0;
++  size_t i = 0;
++  while (i < src.size()) {
++    if (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
++      ++i;
++    } else if (src.substr(i, 2) == "//") {
++      i = std::min(src.find('\n', i), src.size());
++    } else if (src.substr(i, 2) == "/*") {
++      const size_t end = src.find("*/", i + 2);
++      if (end == std::string_view::npos) {
++        return source;
++      }
++      i = end + 2;
++    } else {
++      break;
++    }
++  }
++  if (i < src.size() && src[i] == '#') {
++    const size_t word = src.find_first_not_of(" \t", i + 1);
++    if (word != std::string_view::npos &&
++        src.substr(word).starts_with("version")) {
++      const size_t eol = src.find('\n', word);
++      if (eol == std::string_view::npos) {
++        return source;
++      }
++      body_start = eol + 1;
++    }
++  }
++
++  // A shader with no main() at all keeps exactly the error the page expects.
++  auto is_ident = [](char c) {
++    return base::IsAsciiAlphaNumeric(c) || c == '_';
++  };
++  bool has_main = false;
++  for (size_t p = src.find("main", body_start); p != std::string_view::npos;
++       p = src.find("main", p + 4)) {
++    if ((p == 0 || !is_ident(src[p - 1])) &&
++        (p + 4 >= src.size() || !is_ident(src[p + 4]))) {
++      has_main = true;
++      break;
++    }
++  }
++  if (!has_main) {
++    return source;
++  }
++
++  const size_t body_line =
++      static_cast<size_t>(std::ranges::count(src.substr(0, body_start), '\n')) +
++      1;
++  return base::StrCat(
++      {src.substr(0, body_start), "#define main ", kInnerMain, "\n#line ",
++       base::NumberToString(body_line), "\n", src.substr(body_start),
++       "\n#undef main\nvoid main() {\n  ", kInnerMain,
++       "();\n  gl_Position.xy += vec2(", base::StringPrintf("%.6e", dx), ", ",
++       base::StringPrintf("%.6e", dy), ") * gl_Position.w;\n}\n"});
++}
++
++}  // namespace
++
+ void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
+                                              const String& string) {
+   if (!ValidateWebGLProgramOrShader("shaderSource", shader))
+@@ -5338,8 +5454,19 @@ void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
+   String ascii_string = ReplaceNonASCII(string).Result();
+   shader->SetSource(string);
+   DCHECK(ascii_string.Is8Bit() && ascii_string.ContainsOnlyAsciiOrEmpty());
+-  const GLchar* shader_data = base::as_chars(ascii_string.Span8()).data();
+-  const GLint shader_length = ascii_string.length();
++  base::span<const char> source_chars = base::as_chars(ascii_string.Span8());
++  // Chronium: see AddVertexOffset. getShaderSource() still returns |string|.
++  std::string noised_source;
++  if (shader->GetType() == GL_VERTEX_SHADER) {
++    if (const auto offset = FingerprintState::WebGLVertexOffset()) {
++      noised_source =
++          AddVertexOffset(std::string(source_chars.begin(), source_chars.end()),
++                          offset->first, offset->second);
++      source_chars = base::span(noised_source);
++    }
++  }
++  const GLchar* shader_data = source_chars.data();
++  const GLint shader_length = base::checked_cast<GLint>(source_chars.size());
+   ContextGL()->ShaderSource(ObjectOrZero(shader), 1, &shader_data,
+                             &shader_length);
+ }
+diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
+index ef98d8a..d6237cb 100644
+--- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
++++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
+@@ -126,6 +126,29 @@ std::string& WebGLExtensionsStorage() {
+ }
+ std::atomic<bool> g_webgl_extensions_set{false};
+ 
++std::string& WebGL1ExtensionsStorage() {
++  static base::NoDestructor<std::string> s;
++  return *s;
++}
++std::atomic<bool> g_webgl1_extensions_set{false};
++
++// Splits a '\n'-joined blob, skipping empty entries.
++std::vector<std::string> SplitNonEmptyLines(const std::string& blob) {
++  std::vector<std::string> out;
++  size_t pos = 0;
++  while (pos < blob.size()) {
++    size_t end = blob.find('\n', pos);
++    if (end == std::string::npos) {
++      end = blob.size();
++    }
++    if (end > pos) {
++      out.emplace_back(blob.substr(pos, end - pos));
++    }
++    pos = end + 1;
++  }
++  return out;
++}
++
+ // Full WebGL parameter surface. Three parallel maps keyed by GLenum
+ // (pname) cover the three value shapes WebGLRenderingContextBase's
+ // getParameter switch returns: single int, int-range pair, float-range
+@@ -170,8 +193,11 @@ uint64_t PrecisionKey(uint32_t shader_type, uint32_t precision_type) {
+          static_cast<uint64_t>(precision_type);
+ }
+ 
+-std::atomic<bool> g_audio_noise_enabled{true};
+-std::atomic<bool> g_audio_noise_set{false};
++// Legacy default: audio noise on at 1e-5 until the profile says otherwise.
++std::atomic<float> g_audio_noise_amplitude{1e-5f};
++std::atomic<bool> g_webgl_noise{true};
++std::atomic<bool> g_canvas_noise{true};
++std::atomic<int> g_noise_version{1};
+ 
+ // xxHash-style scalar mix. Cryptographically weak but plenty good for
+ // distinguishing fingerprints. Deterministic for the same (seed, channel,
+@@ -531,23 +557,33 @@ bool FingerprintState::HasWebGLExtensions() {
+ 
+ // static
+ std::vector<std::string> FingerprintState::WebGLExtensions() {
+-  std::vector<std::string> out;
+   if (!g_webgl_extensions_set.load(std::memory_order_acquire)) {
+-    return out;
++    return {};
+   }
+-  const std::string& blob = WebGLExtensionsStorage();
+-  size_t pos = 0;
+-  while (pos < blob.size()) {
+-    size_t end = blob.find('\n', pos);
+-    if (end == std::string::npos) {
+-      end = blob.size();
+-    }
+-    if (end > pos) {
+-      out.emplace_back(blob.substr(pos, end - pos));
+-    }
+-    pos = end + 1;
++  return SplitNonEmptyLines(WebGLExtensionsStorage());
++}
++
++// static
++void FingerprintState::SetWebGL1Extensions(std::string_view newline_list) {
++  if (g_webgl1_extensions_set.load(std::memory_order_acquire) ||
++      newline_list.empty()) {
++    return;
+   }
+-  return out;
++  WebGL1ExtensionsStorage().assign(newline_list);
++  g_webgl1_extensions_set.store(true, std::memory_order_release);
++}
++
++// static
++bool FingerprintState::HasWebGL1Extensions() {
++  return g_webgl1_extensions_set.load(std::memory_order_acquire);
++}
++
++// static
++std::vector<std::string> FingerprintState::WebGL1Extensions() {
++  if (!g_webgl1_extensions_set.load(std::memory_order_acquire)) {
++    return {};
++  }
++  return SplitNonEmptyLines(WebGL1ExtensionsStorage());
+ }
+ 
+ // static
+@@ -707,14 +743,93 @@ std::tuple<int32_t, int32_t, int32_t> FingerprintState::WebGLShaderPrecision(
+ }
+ 
+ // static
+-void FingerprintState::SetAudioNoise(bool enabled) {
+-  g_audio_noise_enabled.store(enabled, std::memory_order_release);
+-  g_audio_noise_set.store(true, std::memory_order_release);
++void FingerprintState::SetAudioNoiseAmplitude(float amplitude) {
++  // NaN / negative -> off. Above 1e-2 (-40 dB gain jitter) is audible and
++  // almost certainly a units mistake in the profile, so clamp.
++  if (!(amplitude > 0.0f)) {
++    amplitude = 0.0f;
++  } else if (amplitude > 1e-2f) {
++    amplitude = 1e-2f;
++  }
++  g_audio_noise_amplitude.store(amplitude, std::memory_order_release);
++}
++
++// static
++float FingerprintState::AudioNoiseAmplitude() {
++  return g_audio_noise_amplitude.load(std::memory_order_acquire);
+ }
+ 
+ // static
+ bool FingerprintState::AudioNoiseEnabled() {
+-  return g_audio_noise_enabled.load(std::memory_order_acquire);
++  return IsActive() && AudioNoiseAmplitude() > 0.0f;
++}
++
++// static
++void FingerprintState::SetNoiseVersion(int version) {
++  g_noise_version.store(version > 0 ? version : 1, std::memory_order_release);
++}
++
++// static
++int FingerprintState::NoiseVersion() {
++  return g_noise_version.load(std::memory_order_acquire);
++}
++
++// static
++void FingerprintState::SetCanvasNoise(bool enabled) {
++  g_canvas_noise.store(enabled, std::memory_order_release);
++}
++
++// static
++bool FingerprintState::LegacyCanvasReadNoiseEnabled() {
++  return IsActive() && NoiseVersion() < 2 &&
++         g_canvas_noise.load(std::memory_order_acquire);
++}
++
++// static
++std::optional<std::pair<float, float>> FingerprintState::CanvasTextNoise() {
++  if (!IsActive() || NoiseVersion() < 2 ||
++      !g_canvas_noise.load(std::memory_order_acquire)) {
++    return std::nullopt;
++  }
++  // Measured on Chrome 148 / Windows: canvas glyphs snap to whole pixels
++  // vertically and to quarter pixels horizontally. A 0.25-0.45 px
++  // horizontal shift therefore always moves every glyph (short strings and
++  // emoji included), and a 0.15%-0.4% scale about the anchor varies longer
++  // strings continuously between profiles. Both are far below visible.
++  const uint32_t scale_hash = HashAt("canvas-text", 0u, 0u);
++  const float scale_magnitude =
++      1.5e-3f +
++      2.5e-3f * (static_cast<float>(scale_hash & 0xFFFFu) / 65535.0f);
++  const float scale = (scale_hash & 0x10000u) ? 1.0f + scale_magnitude
++                                              : 1.0f - scale_magnitude;
++  const uint32_t shift_hash = HashAt("canvas-text", 1u, 0u);
++  const float shift_magnitude =
++      0.25f + 0.2f * (static_cast<float>(shift_hash & 0xFFFFu) / 65535.0f);
++  const float shift =
++      (shift_hash & 0x10000u) ? shift_magnitude : -shift_magnitude;
++  return std::make_pair(scale, shift);
++}
++
++// static
++void FingerprintState::SetWebGLNoise(bool enabled) {
++  g_webgl_noise.store(enabled, std::memory_order_release);
++}
++
++// static
++std::optional<std::pair<float, float>> FingerprintState::WebGLVertexOffset() {
++  if (!IsActive() || NoiseVersion() < 2 ||
++      !g_webgl_noise.load(std::memory_order_acquire)) {
++    return std::nullopt;
++  }
++  // 2e-4..6e-4 in clip space, i.e. ~0.03-0.09 px on a 300 px canvas. Moves
++  // interpolated colours and anti-aliased edges; a clear stays untouched.
++  auto component = [](uint32_t axis) {
++    const uint32_t hash = HashAt("webgl-vertex", axis, 0u);
++    const float magnitude =
++        2e-4f + 4e-4f * (static_cast<float>(hash & 0xFFFFu) / 65535.0f);
++    return (hash & 0x10000u) ? magnitude : -magnitude;
++  };
++  return std::make_pair(component(0u), component(1u));
+ }
+ 
+ // static
+diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
+index 1f16f7c..0ec7d3f 100644
+--- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
++++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
+@@ -17,6 +17,7 @@
+ 
+ #include <array>
+ #include <cstdint>
++#include <optional>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+@@ -199,6 +200,13 @@ class PLATFORM_EXPORT FingerprintState {
+   static std::vector<std::string> WebGLExtensions();
+   static bool HasWebGLExtensions();
+ 
++  // WebGL1 getSupportedExtensions() allowlist (webgl.extensions_webgl1),
++  // same format. The list above applies to WebGL2 contexts only; a context
++  // type without a list reports its real extensions.
++  static void SetWebGL1Extensions(std::string_view newline_list);
++  static std::vector<std::string> WebGL1Extensions();
++  static bool HasWebGL1Extensions();
++
+   // speechSynthesis.getVoices() override. Voices are stored as a single
+   // serialized blob to avoid heap fragmentation across multiple
+   // SpeechSynthesis instances. Format: lines separated by '\n', each line
+@@ -217,15 +225,44 @@ class PLATFORM_EXPORT FingerprintState {
+   static VoiceList SpeechVoices();
+   static bool HasSpeechVoices();
+ 
+-  // Per-vector noise enable. CreepJS / Pixelscan ship specific traps
+-  // that detect when the audio sample stream is being perturbed (their
+-  // "audio trap" hashes samples 80-90 and checks for the expected
+-  // oscillator output) — a profile pinned to a real-but-vanilla device
+-  // can opt out so the noise stops giving the spoof away. Default is
+-  // enabled (legacy behavior) until SetAudioNoise(false) is called.
+-  static void SetAudioNoise(bool enabled);
++  // Audio noise amplitude (noise.audio_amplitude): relative gain jitter
++  // applied ONCE to OfflineAudioContext render output (see
++  // OfflineAudioContext::FireCompletionEvent) and to AnalyserNode readouts.
++  // AudioBuffers created and filled by script are never perturbed, so
++  // CreepJS' audio "trap" (write known samples, read them back) stays
++  // exact and getChannelData/copyFromChannel always agree. 0 disables.
++  // Default 1e-5 (legacy) until set. Values below ~2e-7 are mostly lost
++  // to float32 rounding; the useful range is 1e-6..1e-4.
++  static void SetAudioNoiseAmplitude(float amplitude);
++  static float AudioNoiseAmplitude();
++  // True when IsActive() and the amplitude is > 0.
+   static bool AudioNoiseEnabled();
+ 
++  // Noise scheme (noise.version). 1, the default, keeps the legacy
++  // read-time canvas noise so profiles already signed in to accounts keep
++  // rendering exactly as before. 2 switches to render-time noise: canvas
++  // text is drawn with a seeded sub-pixel shift and scale, and WebGL vertex
++  // positions get a seeded sub-pixel offset. Nothing is altered on read,
++  // so getImageData / toDataURL / toBlob / readPixels / drawImage all see
++  // the same pixels, flat colours stay flat and putImageData round-trips
++  // stay exact.
++  static void SetNoiseVersion(int version);
++  static int NoiseVersion();
++
++  // noise.canvas_threshold: 0 turns canvas noise off, in both schemes.
++  static void SetCanvasNoise(bool enabled);
++  // Version 1 read-time LSB noise on canvas exports and getImageData.
++  static bool LegacyCanvasReadNoiseEnabled();
++  // Version 2 canvas text noise: {scale about the text anchor, horizontal
++  // shift in CSS px}; nullopt when off.
++  static std::optional<std::pair<float, float>> CanvasTextNoise();
++
++  // noise.webgl_readpixels: WebGL pixel noise, version 2 only (applied at
++  // render time through the vertex shader). Default enabled.
++  static void SetWebGLNoise(bool enabled);
++  // Seeded clip-space offset added to gl_Position.xy; nullopt when off.
++  static std::optional<std::pair<float, float>> WebGLVertexOffset();
++
+   // Deterministic 32-bit hash of (process seed, channel, x, y).
+   // |channel| should be a short stable string identifying the fingerprint
+   // surface, e.g. "canvas", "webgl-readpixels", "audio".
+-- 
+2.49.0.windows.1
+

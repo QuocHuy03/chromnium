@@ -381,6 +381,9 @@ const char kFingerprintWebGLParams[] = "fingerprint-webgl-params";
 const char kFingerprintAudioNoise[] = "fingerprint-audio-noise";
 const char kFingerprintWebGLReadPixelsNoise[] =
     "fingerprint-webgl-readpixels-noise";
+const char kFingerprintWebGL1Extensions[] = "fingerprint-webgl1-extensions";
+const char kFingerprintNoiseVersion[] = "fingerprint-noise-version";
+const char kFingerprintCanvasNoise[] = "fingerprint-canvas-noise";
 const char kLicenseTs[]    = "license-ts";
 const char kLicenseNonce[] = "license-nonce";
 const char kLicenseToken[] = "license-token";

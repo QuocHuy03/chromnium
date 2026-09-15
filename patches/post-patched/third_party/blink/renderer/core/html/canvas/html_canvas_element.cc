@@ -147,10 +147,11 @@ namespace {
 // new StaticBitmapImage where ~0.4% of pixels have one RGB channel's LSB
 // flipped (deterministic for the same fingerprint profile, different
 // across profiles). Returns |input| unchanged when FingerprintState is
-// inactive or the bitmap cannot be read.
+// inactive or the bitmap cannot be read. Legacy scheme only (noise.version
+// 1): version 2 perturbs at draw time, so exports need nothing here.
 scoped_refptr<StaticBitmapImage> ApplyCanvasFingerprintNoise(
     scoped_refptr<StaticBitmapImage> input) {
-  if (!input || !FingerprintState::IsActive()) {
+  if (!input || !FingerprintState::LegacyCanvasReadNoiseEnabled()) {
     return input;
   }
   PaintImage paint_image = input->PaintImageForCurrentFrame();
