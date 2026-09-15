@@ -1,7 +1,7 @@
-From 3b7124b3738ba3f5eeed14c40ab4d1fd8a11fa13 Mon Sep 17 00:00:00 2001
+From 04fe34ab77c5a754ade5b855ca3f45932c44b071 Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Fri, 5 Jun 2026 16:55:09 +0700
-Subject: [PATCH 04/14] chronium: sync seed propagation, getImageData noise,
+Subject: [PATCH 04/20] chronium: sync seed propagation, getImageData noise,
  WebGL unmasked_* spoof
 
 Bundles three fingerprint-surface improvements that share infra
@@ -76,18 +76,18 @@ Files touched:
  10 files changed, 188 insertions(+)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index f823433796c5c..8ba037c460f39 100644
+index e30528e..64e0390 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -625,6 +625,7 @@
- #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+@@ -661,6 +661,7 @@
  #include "chrome/browser/extensions/chrome_content_browser_client_extensions_part.h"
  #include "chrome/browser/extensions/chrome_extension_cookies.h"
+ #include "chrome/browser/extensions/extension_util.h"
 +#include "chrome/browser/fingerprint/fingerprint_profile.h"
  #include "extensions/browser/api/web_request/web_request_api.h"
  #include "extensions/browser/extension_protocols.h"
  #include "extensions/browser/extension_registry.h"
-@@ -2799,6 +2800,29 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2889,6 +2890,29 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
      base::CommandLine* command_line,
      int child_process_id) {
    crash_keys::AppendStringAnnotationsCommandLineSwitch(command_line);
@@ -118,7 +118,7 @@ index f823433796c5c..8ba037c460f39 100644
    std::unique_ptr<metrics::ClientInfo> client_info =
        GoogleUpdateSettings::LoadMetricsClientInfo();
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index 56a64ade2b5eb..43f44f8f71b2a 100644
+index 56a64ad..43f44f8 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -64,6 +64,30 @@ void FingerprintProfile::GetConfig(GetConfigCallback callback) {
@@ -153,7 +153,7 @@ index 56a64ade2b5eb..43f44f8f71b2a 100644
    std::string contents;
    if (!base::ReadFileToString(path, &contents)) {
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index 3ff3f5e1cd2fe..eef348904783c 100644
+index 3ff3f5e..eef3489 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -13,6 +13,7 @@
@@ -177,10 +177,10 @@ index 3ff3f5e1cd2fe..eef348904783c 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 40aa27fe711f5..0ee803d9014a9 100644
+index cd95de8..a5ff3ff 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -350,6 +350,14 @@ const char kForceWhatsNew[] = "force-whats-new";
+@@ -367,6 +367,14 @@ const char kForceWhatsNew[] = "force-whats-new";
  // Loaded once at startup by chronium::FingerprintProfile::LoadFromFile().
  const char kFingerprintProfile[] = "fingerprint-profile";
  
@@ -196,10 +196,10 @@ index 40aa27fe711f5..0ee803d9014a9 100644
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
  // enabled, because the ChromeOS full restore notification is shown for the user
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index 78b10315d7970..a610f27250215 100644
+index 97c6a47..865fd2e 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -126,6 +126,19 @@ extern const char kForceWhatsNew[];
+@@ -129,6 +129,19 @@ extern const char kForceWhatsNew[];
  // Chronium: path to a per-profile fingerprint JSON config file.
  extern const char kFingerprintProfile[];
  
@@ -220,10 +220,10 @@ index 78b10315d7970..a610f27250215 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 347d6c4d50612..351c491de17e1 100644
+index 1cfb0d2..6ded03f 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -38,6 +38,7 @@
+@@ -40,6 +40,7 @@
  #include "chrome/common/chrome_isolated_world_ids.h"
  #include "chrome/common/chrome_paths.h"
  #include "chrome/common/chrome_switches.h"
@@ -231,7 +231,7 @@ index 347d6c4d50612..351c491de17e1 100644
  #include "chrome/common/crash_keys.h"
  #include "chrome/common/profiler/chrome_thread_group_profiler_client.h"
  #include "chrome/common/profiler/chrome_thread_profiler_client.h"
-@@ -381,6 +382,29 @@ ChromeContentRendererClient::~ChromeContentRendererClient() = default;
+@@ -384,6 +385,29 @@ ChromeContentRendererClient::~ChromeContentRendererClient() = default;
  void ChromeContentRendererClient::RenderThreadStarted() {
    RenderThread* thread = RenderThread::Get();
  
@@ -262,18 +262,18 @@ index 347d6c4d50612..351c491de17e1 100644
        &CreateV8Unwinder, base::Unretained(v8::Isolate::GetCurrent())));
  
 diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-index 381f92b90579f..86c5c36883113 100644
+index 38528f7..32b9257 100644
 --- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
 +++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-@@ -86,6 +86,7 @@
- #include "third_party/blink/renderer/platform/graphics/image_data_buffer.h"
+@@ -88,6 +88,7 @@
  #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
+ #include "third_party/blink/renderer/platform/graphics/scoped_raster_timer.h"
  #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 +#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
  #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
  #include "third_party/blink/renderer/platform/graphics/video_frame_image_util.h"
  #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-@@ -531,6 +532,30 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+@@ -513,6 +514,30 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
        SkIRect bounds =
            snapshot->PaintImageForCurrentFrame().GetSkImageInfo().bounds();
        DCHECK(!bounds.intersect(SkIRect::MakeXYWH(sx, sy, sw, sh)));
@@ -305,18 +305,18 @@ index 381f92b90579f..86c5c36883113 100644
    }
  
 diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-index e3f40494b329d..c7a6fbbe8ffc5 100644
+index 403e1b3..da1b5ab 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-@@ -127,6 +127,7 @@
+@@ -138,6 +138,7 @@
  #include "third_party/blink/renderer/modules/xr/xr_system.h"
  #include "third_party/blink/renderer/platform/bindings/exception_state.h"
  #include "third_party/blink/renderer/platform/bindings/script_state.h"
 +#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
  #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
- #include "third_party/blink/renderer/platform/graphics/canvas_non2d_snapshot_provider_bitmap.h"
- #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
-@@ -3997,6 +3998,11 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+ #include "third_party/blink/renderer/platform/graphics/canvas_2d_resource_provider.h"
+ #include "third_party/blink/renderer/platform/graphics/canvas_non_2d_resource_provider.h"
+@@ -4200,6 +4201,11 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
        return ScriptValue::CreateNull(script_state->GetIsolate());
      case WebGLDebugRendererInfo::kUnmaskedRendererWebgl:
        if (ExtensionEnabled(kWebGLDebugRendererInfoName)) {
@@ -328,7 +328,7 @@ index e3f40494b329d..c7a6fbbe8ffc5 100644
          return WebGLAny(script_state,
                          String(ContextGL()->GetString(GL_RENDERER)));
        }
-@@ -4006,6 +4012,11 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+@@ -4209,6 +4215,11 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
        return ScriptValue::CreateNull(script_state->GetIsolate());
      case WebGLDebugRendererInfo::kUnmaskedVendorWebgl:
        if (ExtensionEnabled(kWebGLDebugRendererInfoName)) {
@@ -341,7 +341,7 @@ index e3f40494b329d..c7a6fbbe8ffc5 100644
                          String(ContextGL()->GetString(GL_VENDOR)));
        }
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 0bb61f9339b23..40299adcc9b83 100644
+index 0bb61f9..40299ad 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -6,6 +6,8 @@
@@ -413,7 +413,7 @@ index 0bb61f9339b23..40299adcc9b83 100644
  uint32_t FingerprintState::HashAt(std::string_view channel,
                                    uint32_t x,
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index 1f020bcc83441..bcf852d88dce6 100644
+index 1f020bc..bcf852d 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -17,6 +17,7 @@
@@ -446,5 +446,5 @@ index 1f020bcc83441..bcf852d88dce6 100644
    // |channel| should be a short stable string identifying the fingerprint
    // surface, e.g. "canvas", "webgl-readpixels", "audio".
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

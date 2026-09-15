@@ -1,8 +1,8 @@
-From 72f0aa968d3dd53bbb0e399ef911d593b3dc1c31 Mon Sep 17 00:00:00 2001
+From 9c08e2e8d445e645b951cc350186287c336dab3d Mon Sep 17 00:00:00 2001
 From: Chronium <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 18:09:15 +0700
-Subject: [PATCH] chronium: skip TLS Trust Anchor IDs extension (0xCA34) for
- JA4 parity with Chrome stable
+Subject: [PATCH 16/20] chronium: skip TLS Trust Anchor IDs extension (0xCA34)
+ for JA4 parity with Chrome stable
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -42,10 +42,10 @@ IP-reputation-gated sites.
  1 file changed, 16 insertions(+), 14 deletions(-)
 
 diff --git a/net/socket/ssl_client_socket_impl.cc b/net/socket/ssl_client_socket_impl.cc
-index 8ac44772109a8..279997ea6b787 100644
+index 67c6c41..25d7eb8 100644
 --- a/net/socket/ssl_client_socket_impl.cc
 +++ b/net/socket/ssl_client_socket_impl.cc
-@@ -845,20 +845,22 @@ int SSLClientSocketImpl::Init() {
+@@ -863,20 +863,22 @@ int SSLClientSocketImpl::Init() {
  
    SSL_set_permute_extensions(ssl_.get(), 1);
  
@@ -80,8 +80,8 @@ index 8ac44772109a8..279997ea6b787 100644
 +  //     net_log_.AddEvent(...);
 +  //   }
  
-   // The compliance policy must be the last thing configured in order to have
-   // defined behavior.
+   // Configure BoringSSL to ask for server padding, if provided.
+   if (ssl_config_.server_padding_to_request.has_value()) {
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

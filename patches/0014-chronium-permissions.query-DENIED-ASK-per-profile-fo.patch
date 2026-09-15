@@ -1,7 +1,7 @@
-From 3565b726bb2e098d6bf87f297873f66a91b210d3 Mon Sep 17 00:00:00 2001
+From aa56195f6c039f80afbba20cd53af8d48bcccaf1 Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 13:10:30 +0700
-Subject: [PATCH 14/14] chronium: permissions.query DENIED -> ASK + per-profile
+Subject: [PATCH 14/20] chronium: permissions.query DENIED -> ASK + per-profile
  font enumeration allowlist
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -69,17 +69,17 @@ Files touched:
  chrome/common/chrome_switches.cc              |  1 +
  chrome/common/chrome_switches.h               |  4 ++
  .../chrome_content_renderer_client.cc         |  5 ++
- .../modules/permissions/permissions.cc        | 24 ++++++++
+ .../modules/permissions/permissions.cc        | 23 +++++++-
  .../platform/fingerprint/fingerprint_state.cc | 59 +++++++++++++++++++
  .../platform/fingerprint/fingerprint_state.h  |  8 +++
  .../renderer/platform/fonts/font_cache.cc     | 13 ++++
- 10 files changed, 140 insertions(+)
+ 10 files changed, 137 insertions(+), 2 deletions(-)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index eb79edfb0dbcc..c261099fb25ab 100644
+index 4d625ed..ade333c 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2855,6 +2855,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2945,6 +2945,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
        if (!tz.empty()) {
          command_line->AppendSwitchASCII(switches::kFingerprintTimezone, tz);
        }
@@ -91,7 +91,7 @@ index eb79edfb0dbcc..c261099fb25ab 100644
    }
  #if BUILDFLAG(IS_MAC)
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index 2c8a6cabe14b7..77716f202dc71 100644
+index 2c8a6ca..77716f2 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -236,6 +236,24 @@ FingerprintProfile::UserAgentMetadata() const {
@@ -120,7 +120,7 @@ index 2c8a6cabe14b7..77716f202dc71 100644
    if (!loaded_) {
      return {};
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index fb1d7777fe52a..57cdf6fe84749 100644
+index fb1d777..57cdf6f 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -103,6 +103,10 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
@@ -135,10 +135,10 @@ index fb1d7777fe52a..57cdf6fe84749 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 17765b5649c38..109dd509dcdd5 100644
+index 486bf85..cc93197 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -369,6 +369,7 @@ const char kFingerprintBattery[] = "fingerprint-battery";
+@@ -386,6 +386,7 @@ const char kFingerprintBattery[] = "fingerprint-battery";
  const char kFingerprintWebRtcPolicy[] = "fingerprint-webrtc-policy";
  const char kFingerprintAcceptLanguage[] = "fingerprint-accept-language";
  const char kFingerprintTimezone[] = "fingerprint-timezone";
@@ -147,10 +147,10 @@ index 17765b5649c38..109dd509dcdd5 100644
  // Does not show the crash restore bubble when the browser is started during the
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index 91ce43aac5e7a..867970c551333 100644
+index 8a1ff31..1e7da31 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -166,6 +166,10 @@ extern const char kFingerprintAcceptLanguage[];
+@@ -169,6 +169,10 @@ extern const char kFingerprintAcceptLanguage[];
  // Chronium (internal): IANA timezone override, e.g. "America/New_York".
  extern const char kFingerprintTimezone[];
  
@@ -162,10 +162,10 @@ index 91ce43aac5e7a..867970c551333 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 3af0e8877c482..1b59f36322dce 100644
+index 32aae17..bffac39 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -479,6 +479,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -482,6 +482,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
      if (!tz.empty()) {
        blink::FingerprintState::SetTimezone(tz);
      }
@@ -178,7 +178,7 @@ index 3af0e8877c482..1b59f36322dce 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/modules/permissions/permissions.cc b/third_party/blink/renderer/modules/permissions/permissions.cc
-index 378eaa2bdeb69..f109590c4fa4c 100644
+index e36c344..5c5b0ff 100644
 --- a/third_party/blink/renderer/modules/permissions/permissions.cc
 +++ b/third_party/blink/renderer/modules/permissions/permissions.cc
 @@ -16,6 +16,7 @@
@@ -189,17 +189,14 @@ index 378eaa2bdeb69..f109590c4fa4c 100644
  #include "third_party/blink/renderer/core/dom/dom_exception.h"
  #include "third_party/blink/renderer/core/execution_context/execution_context.h"
  #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
-@@ -289,6 +290,29 @@ void Permissions::TaskComplete(
+@@ -276,8 +277,26 @@ void Permissions::TaskComplete(
        resolver->GetExecutionContext()->IsContextDestroyed())
      return;
  
-+  // Chronium: when a fingerprint profile is active, map DENIED to ASK for
-+  // the permissions that fingerprinters cross-check against the
-+  // corresponding JS-visible state (Notification.permission etc.). A
-+  // fresh user with no interaction yields Notification.permission ===
-+  // 'default', so permissions.query({name:'notifications'}) returning
-+  // 'denied' is a well-known headless-Chrome tell. We force 'prompt'
-+  // here so the two sides match the real user signal.
+-  PermissionStatusListener* listener = GetOrCreatePermissionStatusListener(
+-      std::move(result), std::move(descriptor));
++  // Chronium: map DENIED to ASK for the permissions fingerprinters
++  // cross-check against JS-visible state (Notification.permission etc.).
 +  if (result == mojom::blink::PermissionStatus::DENIED &&
 +      FingerprintState::IsActive()) {
 +    using mojom::blink::PermissionName;
@@ -216,11 +213,13 @@ index 378eaa2bdeb69..f109590c4fa4c 100644
 +    }
 +  }
 +
-   PermissionStatusListener* listener =
-       GetOrCreatePermissionStatusListener(result, std::move(descriptor));
++  PermissionStatusListener* listener =
++      GetOrCreatePermissionStatusListener(result, std::move(descriptor));
    if (listener)
+     resolver->Resolve(PermissionStatus::Take(listener, resolver));
+ }
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 8dd88ce1ee309..4428759e7c6c3 100644
+index 8dd88ce..4428759 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -51,6 +51,13 @@ std::string& TimezoneStorage() {
@@ -297,7 +296,7 @@ index 8dd88ce1ee309..4428759e7c6c3 100644
  void FingerprintState::SetScreen(const ScreenFp& screen) {
    if (g_screen_set.load(std::memory_order_acquire) || screen.width <= 0 ||
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index 4377bdd314bc6..94d8a66fa9398 100644
+index 4377bdd..94d8a66 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -54,6 +54,14 @@ class PLATFORM_EXPORT FingerprintState {
@@ -316,10 +315,10 @@ index 4377bdd314bc6..94d8a66fa9398 100644
    static std::string_view WebGLUnmaskedVendor();
    static std::string_view WebGLUnmaskedRenderer();
 diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_party/blink/renderer/platform/fonts/font_cache.cc
-index 75cc0b764f8c4..cb2e0ac682dce 100644
+index 636e2ca..1f2fb34 100644
 --- a/third_party/blink/renderer/platform/fonts/font_cache.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
-@@ -47,6 +47,7 @@
+@@ -52,6 +52,7 @@
  #include "third_party/blink/renderer/platform/font_family_names.h"
  #include "third_party/blink/renderer/platform/fonts/alternate_font_family.h"
  #include "third_party/blink/renderer/platform/fonts/font_cache_client.h"
@@ -327,7 +326,7 @@ index 75cc0b764f8c4..cb2e0ac682dce 100644
  #include "third_party/blink/renderer/platform/fonts/font_data_cache.h"
  #include "third_party/blink/renderer/platform/fonts/font_description.h"
  #include "third_party/blink/renderer/platform/fonts/font_fallback_map.h"
-@@ -141,6 +142,18 @@ const FontPlatformData* FontCache::GetFontPlatformData(
+@@ -165,6 +166,18 @@ const FontPlatformData* FontCache::GetFontPlatformData(
    }
  #endif
  
@@ -347,5 +346,5 @@ index 75cc0b764f8c4..cb2e0ac682dce 100644
        this, font_description, creation_params, alternate_font_name);
  }
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

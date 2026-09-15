@@ -1,7 +1,7 @@
-From 0bfcd8df57f619d20be6e3f5668c66bf58af221f Mon Sep 17 00:00:00 2001
+From 07cec4b9fdeedc81564e73ffc12b8e6b852b1f47 Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Fri, 5 Jun 2026 16:11:48 +0700
-Subject: [PATCH 03/14] chronium: seeded canvas pixel noise in toDataURL and
+Subject: [PATCH 03/20] chronium: seeded canvas pixel noise in toDataURL and
  toBlob
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -62,18 +62,18 @@ Verified: profile A hash -718601788 (len 1562), profile B hash
  create mode 100644 third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 
 diff --git a/chrome/renderer/chrome_render_frame_observer.cc b/chrome/renderer/chrome_render_frame_observer.cc
-index 6522a4d35e6e7..35802b72ddcd0 100644
+index e600648..9679408 100644
 --- a/chrome/renderer/chrome_render_frame_observer.cc
 +++ b/chrome/renderer/chrome_render_frame_observer.cc
-@@ -28,6 +28,7 @@
+@@ -30,6 +30,7 @@
  #include "chrome/common/chrome_switches.h"
  #include "chrome/common/fingerprint.mojom.h"
  #include "chrome/common/open_search_description_document_handler.mojom.h"
 +#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
  #include "chrome/common/webui_url_constants.h"
+ #include "chrome/renderer/actor/chrome_page_stability_monitor_delegate.h"
  #include "chrome/renderer/actor/journal.h"
- #include "chrome/renderer/actor/page_stability_monitor.h"
-@@ -297,13 +298,9 @@ void ChromeRenderFrameObserver::DidCreateNewDocument() {
+@@ -332,13 +333,9 @@ void ChromeRenderFrameObserver::DidCreateNewDocument() {
          [](mojo::Remote<chrome::mojom::FingerprintConfigProvider>,
             chrome::mojom::FingerprintConfigPtr config) {
            if (config && config->seed.size() == 32) {
@@ -91,10 +91,10 @@ index 6522a4d35e6e7..35802b72ddcd0 100644
          },
          std::move(fp_provider)));
 diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-index 6a7419e4a1f1a..0b8e1604bfa05 100644
+index fb2d3e7..a9e91ff 100644
 --- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 +++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-@@ -120,9 +120,13 @@
+@@ -119,9 +119,13 @@
  #include "third_party/blink/renderer/platform/graphics/memory_managed_paint_recorder.h"
  #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
  #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
@@ -160,8 +160,8 @@ index 6a7419e4a1f1a..0b8e1604bfa05 100644
  constexpr unsigned kMaxCanvasAnimationBacklog = 2;
  
  // These two constants determine if a newly created canvas starts with
-@@ -1307,6 +1356,8 @@ String HTMLCanvasElement::ToDataURLInternal(
-           mime_type, ImageEncoderUtils::kEncodeReasonToDataURL);
+@@ -1299,6 +1348,8 @@ String HTMLCanvasElement::ToDataURLInternal(
+       ImageEncoderUtils::ToEncodingMimeType(mime_type);
  
    scoped_refptr<StaticBitmapImage> image_bitmap = Snapshot(source_buffer);
 +  // Chronium: per-profile pixel noise before encoding.
@@ -169,7 +169,7 @@ index 6a7419e4a1f1a..0b8e1604bfa05 100644
    if (image_bitmap) {
      std::unique_ptr<ImageDataBuffer> data_buffer =
          ImageDataBuffer::Create(image_bitmap);
-@@ -1418,6 +1469,8 @@ void HTMLCanvasElement::toBlob(V8BlobCallback* callback,
+@@ -1403,6 +1454,8 @@ void HTMLCanvasElement::toBlob(V8BlobCallback* callback,
  
    CanvasAsyncBlobCreator* async_creator = nullptr;
    scoped_refptr<StaticBitmapImage> image_bitmap = Snapshot(kBackBuffer);
@@ -179,10 +179,10 @@ index 6a7419e4a1f1a..0b8e1604bfa05 100644
      auto* options = ImageEncodeOptions::Create();
      options->setType(ImageEncoderUtils::MimeTypeName(encoding_mime_type));
 diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
-index 87f64f5c2cfd4..93da29e85f02c 100644
+index 9bfa956..883106a 100644
 --- a/third_party/blink/renderer/platform/BUILD.gn
 +++ b/third_party/blink/renderer/platform/BUILD.gn
-@@ -630,6 +630,8 @@ component("platform") {
+@@ -636,6 +636,8 @@ component("platform") {
      "feature_context.h",
      "file_metadata.cc",
      "file_metadata.h",
@@ -193,7 +193,7 @@ index 87f64f5c2cfd4..93da29e85f02c 100644
      "fonts/bitmap_glyphs_block_list.h",
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 new file mode 100644
-index 0000000000000..0bb61f9339b23
+index 0000000..0bb61f9
 --- /dev/null
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -0,0 +1,85 @@
@@ -284,7 +284,7 @@ index 0000000000000..0bb61f9339b23
 +}  // namespace blink
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 new file mode 100644
-index 0000000000000..1f020bcc83441
+index 0000000..1f020bc
 --- /dev/null
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -0,0 +1,49 @@
@@ -338,5 +338,5 @@ index 0000000000000..1f020bcc83441
 +
 +#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FINGERPRINT_FINGERPRINT_STATE_H_
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

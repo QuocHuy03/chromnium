@@ -1,7 +1,7 @@
-From b1ddb3e9c43c87e9cbc042a32c0d619ff213fa1d Mon Sep 17 00:00:00 2001
+From 1eacda2fb50323025aa6847e888617af0f15f1cb Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 11:20:47 +0700
-Subject: [PATCH 12/14] chronium: WebGPU adapter spoof + suppress two
+Subject: [PATCH 12/20] chronium: WebGPU adapter spoof + suppress two
  Chronium-only infobars
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -49,12 +49,12 @@ Files touched:
 - chrome/browser/startup/startup_launch_manager.cc
 ---
  .../browser/startup/startup_launch_manager.cc |  9 ++++++++
- chrome/browser/ui/startup/infobar_utils.cc    |  9 +++++++-
+ chrome/browser/ui/startup/infobar_utils.cc    |  6 ++++-
  .../modules/webgpu/gpu_adapter_info.cc        | 22 +++++++++++++++++--
- 3 files changed, 37 insertions(+), 3 deletions(-)
+ 3 files changed, 34 insertions(+), 3 deletions(-)
 
 diff --git a/chrome/browser/startup/startup_launch_manager.cc b/chrome/browser/startup/startup_launch_manager.cc
-index 1c102e732b3ae..38a4f8e0c3f23 100644
+index 72c77ff..4221fe4 100644
 --- a/chrome/browser/startup/startup_launch_manager.cc
 +++ b/chrome/browser/startup/startup_launch_manager.cc
 @@ -14,6 +14,7 @@
@@ -81,34 +81,31 @@ index 1c102e732b3ae..38a4f8e0c3f23 100644
    constexpr int kRepromptDurationDays = 21;
  
 diff --git a/chrome/browser/ui/startup/infobar_utils.cc b/chrome/browser/ui/startup/infobar_utils.cc
-index 505e8669edbbf..15275181e6aed 100644
+index d7ebcfb..5c0b1e3 100644
 --- a/chrome/browser/ui/startup/infobar_utils.cc
 +++ b/chrome/browser/ui/startup/infobar_utils.cc
-@@ -10,6 +10,7 @@
- #include "build/branding_buildflags.h"
- #include "build/buildflag.h"
+@@ -12,6 +12,7 @@
  #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/infobars/browser_infobar_manager.h"
+ #include "chrome/browser/infobars/infobar_features.h"
 +#include "chrome/browser/fingerprint/fingerprint_profile.h"
  #include "chrome/browser/obsolete_system/obsolete_system.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser.h"
-@@ -184,7 +185,13 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
+@@ -194,7 +195,10 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
    infobars::ContentInfoBarManager* infobar_manager =
        infobars::ContentInfoBarManager::FromWebContents(web_contents);
  
 -  if (!google_apis::HasAPIKeyConfigured()) {
 +  // Chronium: suppress the "Google API keys are missing" banner when a
-+  // fingerprint profile is loaded. We intentionally ship without Google
-+  // API keys (args.gn: use_official_google_api_keys=false); the banner is
-+  // user-visible noise that also leaks "this build was made without
-+  // Google's blessing" to anyone reading the screen.
++  // fingerprint profile is loaded.
 +  if (!chronium::FingerprintProfile::GetInstance()->IsLoaded() &&
 +      !google_apis::HasAPIKeyConfigured()) {
-     GoogleApiKeysInfoBarDelegate::Create(infobar_manager);
-   }
- 
+     if (infobars::IsInfoBarMigrated(
+             infobars::InfoBarDelegate::GOOGLE_API_KEYS_INFOBAR_DELEGATE)) {
+       if (auto* manager =
 diff --git a/third_party/blink/renderer/modules/webgpu/gpu_adapter_info.cc b/third_party/blink/renderer/modules/webgpu/gpu_adapter_info.cc
-index 9d155705c1350..d7b6255af062d 100644
+index 9d15570..d7b6255 100644
 --- a/third_party/blink/renderer/modules/webgpu/gpu_adapter_info.cc
 +++ b/third_party/blink/renderer/modules/webgpu/gpu_adapter_info.cc
 @@ -4,11 +4,28 @@
@@ -158,5 +155,5 @@ index 9d155705c1350..d7b6255af062d 100644
        backend_(backend),
        type_(type),
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

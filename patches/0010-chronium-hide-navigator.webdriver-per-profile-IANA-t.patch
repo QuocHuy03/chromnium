@@ -1,7 +1,7 @@
-From b65af4087efc0c94cc3ec7a4b92cb1e1dc906673 Mon Sep 17 00:00:00 2001
+From b6e06c376669fb76ce749fcc878baf7434d520c0 Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 09:38:47 +0700
-Subject: [PATCH 10/14] chronium: hide navigator.webdriver + per-profile IANA
+Subject: [PATCH 10/20] chronium: hide navigator.webdriver + per-profile IANA
  timezone override
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -72,10 +72,10 @@ Files touched:
  10 files changed, 85 insertions(+)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 6fb3344b4fd6e..b4807537b5f99 100644
+index de8c769..80e07e7 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2851,6 +2851,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2941,6 +2941,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
          command_line->AppendSwitchASCII(switches::kFingerprintAcceptLanguage,
                                          accept_lang);
        }
@@ -87,7 +87,7 @@ index 6fb3344b4fd6e..b4807537b5f99 100644
    }
  #if BUILDFLAG(IS_MAC)
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index 4468633faacbc..77f00137c6569 100644
+index 4468633..77f0013 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -177,6 +177,14 @@ std::string FingerprintProfile::WebRtcPolicyValue() const {
@@ -106,7 +106,7 @@ index 4468633faacbc..77f00137c6569 100644
    if (!loaded_) {
      return {};
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index cb9a3b2add1a4..73ba5b4e5eb9b 100644
+index cb9a3b2..73ba5b4 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -91,6 +91,9 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
@@ -120,10 +120,10 @@ index cb9a3b2add1a4..73ba5b4e5eb9b 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 7f66f096afec3..17765b5649c38 100644
+index 05e1ac7..486bf85 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -368,6 +368,7 @@ const char kFingerprintHardware[] = "fingerprint-hardware";
+@@ -385,6 +385,7 @@ const char kFingerprintHardware[] = "fingerprint-hardware";
  const char kFingerprintBattery[] = "fingerprint-battery";
  const char kFingerprintWebRtcPolicy[] = "fingerprint-webrtc-policy";
  const char kFingerprintAcceptLanguage[] = "fingerprint-accept-language";
@@ -132,10 +132,10 @@ index 7f66f096afec3..17765b5649c38 100644
  // Does not show the crash restore bubble when the browser is started during the
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index 5792fe4f4c6e9..91ce43aac5e7a 100644
+index 3bf1c32..8a1ff31 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -163,6 +163,9 @@ extern const char kFingerprintWebRtcPolicy[];
+@@ -166,6 +166,9 @@ extern const char kFingerprintWebRtcPolicy[];
  // Comma-separated list, e.g. "en-US,en".
  extern const char kFingerprintAcceptLanguage[];
  
@@ -146,10 +146,10 @@ index 5792fe4f4c6e9..91ce43aac5e7a 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index d19f6021cf158..3af0e8877c482 100644
+index 9f089ef..32aae17 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -474,6 +474,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -477,6 +477,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
      if (!accept_lang.empty()) {
        blink::FingerprintState::SetAcceptLanguage(accept_lang);
      }
@@ -162,7 +162,7 @@ index d19f6021cf158..3af0e8877c482 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/core/frame/navigator.cc b/third_party/blink/renderer/core/frame/navigator.cc
-index 806af2d1d9149..d9fe1aa2e6c41 100644
+index 806af2d..d9fe1aa 100644
 --- a/third_party/blink/renderer/core/frame/navigator.cc
 +++ b/third_party/blink/renderer/core/frame/navigator.cc
 @@ -104,6 +104,12 @@ bool Navigator::cookieEnabled() const {
@@ -179,10 +179,10 @@ index 806af2d1d9149..d9fe1aa2e6c41 100644
      return true;
  
 diff --git a/third_party/blink/renderer/core/timezone/timezone_controller.cc b/third_party/blink/renderer/core/timezone/timezone_controller.cc
-index 48eb8d2fbdcf5..8ab8c976182d8 100644
+index 270c78b..eb7e3e5 100644
 --- a/third_party/blink/renderer/core/timezone/timezone_controller.cc
 +++ b/third_party/blink/renderer/core/timezone/timezone_controller.cc
-@@ -11,8 +11,10 @@
+@@ -14,8 +14,10 @@
  #include "third_party/blink/public/platform/platform.h"
  #include "third_party/blink/public/platform/task_type.h"
  #include "third_party/blink/public/web/web_local_frame.h"
@@ -193,7 +193,7 @@ index 48eb8d2fbdcf5..8ab8c976182d8 100644
  #include "third_party/blink/renderer/core/frame/local_dom_window.h"
  #include "third_party/blink/renderer/core/frame/local_frame.h"
  #include "third_party/blink/renderer/core/page/page.h"
-@@ -109,6 +111,32 @@ void TimeZoneController::Init() {
+@@ -117,6 +119,32 @@ void TimeZoneController::Init() {
    Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
        monitor.BindNewPipeAndPassReceiver());
    monitor->AddClient(instance().receiver_.BindNewPipeAndPassRemote());
@@ -227,7 +227,7 @@ index 48eb8d2fbdcf5..8ab8c976182d8 100644
  
  // static
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 90edcf8e1c7f4..8dd88ce1ee309 100644
+index 90edcf8..8dd88ce 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -45,6 +45,12 @@ std::string& AcceptLanguageStorage() {
@@ -268,7 +268,7 @@ index 90edcf8e1c7f4..8dd88ce1ee309 100644
  void FingerprintState::SetScreen(const ScreenFp& screen) {
    if (g_screen_set.load(std::memory_order_acquire) || screen.width <= 0 ||
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index 292321f8a93ed..4377bdd314bc6 100644
+index 292321f..4377bdd 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -50,6 +50,10 @@ class PLATFORM_EXPORT FingerprintState {
@@ -283,5 +283,5 @@ index 292321f8a93ed..4377bdd314bc6 100644
    static std::string_view WebGLUnmaskedVendor();
    static std::string_view WebGLUnmaskedRenderer();
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

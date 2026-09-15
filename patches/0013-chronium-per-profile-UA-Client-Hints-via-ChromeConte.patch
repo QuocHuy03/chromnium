@@ -1,7 +1,7 @@
-From 0b036c348c388f8466ccbf8a507f737771569853 Mon Sep 17 00:00:00 2001
+From 43db04df0e452d827772ca10afd0a0ce6b131135 Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 11:35:28 +0700
-Subject: [PATCH 13/14] chronium: per-profile UA Client Hints via
+Subject: [PATCH 13/20] chronium: per-profile UA Client Hints via
  ChromeContentBrowserClient::GetUserAgentMetadata override
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -62,10 +62,10 @@ Files touched:
  3 files changed, 70 insertions(+)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index b4807537b5f99..eb79edfb0dbcc 100644
+index 80e07e7..4d625ed 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -7561,6 +7561,16 @@ std::string ChromeContentBrowserClient::GetUserAgent() {
+@@ -7744,6 +7744,16 @@ std::string ChromeContentBrowserClient::GetUserAgent() {
  
  blink::UserAgentMetadata ChromeContentBrowserClient::GetUserAgentMetadata() {
    DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -83,7 +83,7 @@ index b4807537b5f99..eb79edfb0dbcc 100644
  }
  
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index 77f00137c6569..2c8a6cabe14b7 100644
+index 77f0013..2c8a6ca 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -185,6 +185,57 @@ std::string FingerprintProfile::Timezone() const {
@@ -145,7 +145,7 @@ index 77f00137c6569..2c8a6cabe14b7 100644
    if (!loaded_) {
      return {};
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index 73ba5b4e5eb9b..fb1d7777fe52a 100644
+index 73ba5b4..fb1d777 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -15,12 +15,15 @@
@@ -178,5 +178,5 @@ index 73ba5b4e5eb9b..fb1d7777fe52a 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

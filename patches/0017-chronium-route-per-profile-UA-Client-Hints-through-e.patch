@@ -1,7 +1,7 @@
-From 801173658a98b87818c5a292ba728c302b8eeac5 Mon Sep 17 00:00:00 2001
+From 97b6f01141143ca834a7b65ed40875971cc4807a Mon Sep 17 00:00:00 2001
 From: Chronium <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 18:33:09 +0700
-Subject: [PATCH] chronium: route per-profile UA Client Hints through
+Subject: [PATCH 17/20] chronium: route per-profile UA Client Hints through
  embedder_support hook
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -49,10 +49,10 @@ the network service does.
  3 files changed, 68 insertions(+)
 
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index 62d0efc258821..a59d9790d9547 100644
+index 6bae14d..306ea1c 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
-@@ -42,6 +42,7 @@
+@@ -44,6 +44,7 @@
  #include "chrome/browser/first_run/bookmark_importer.h"
  // IWYU pragma: keep — embedder_support/switches.h provides kUserAgent.
  #include "components/embedder_support/switches.h"
@@ -60,7 +60,7 @@ index 62d0efc258821..a59d9790d9547 100644
  #include "chrome/browser/first_run/first_run_features.h"
  #include "chrome/browser/gpu/chrome_browser_main_extra_parts_gpu.h"
  #include "chrome/browser/language/url_language_histogram_factory.h"
-@@ -1228,6 +1229,20 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1272,6 +1273,20 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
              !cmd_line->HasSwitch(embedder_support::kUserAgent)) {
            cmd_line->AppendSwitchASCII(embedder_support::kUserAgent, ua);
          }
@@ -82,10 +82,10 @@ index 62d0efc258821..a59d9790d9547 100644
      }
    }
 diff --git a/components/embedder_support/user_agent_utils.cc b/components/embedder_support/user_agent_utils.cc
-index 557eadb18229e..ef76932206b84 100644
+index 3f87ec8..3d56cd5 100644
 --- a/components/embedder_support/user_agent_utils.cc
 +++ b/components/embedder_support/user_agent_utils.cc
-@@ -635,7 +635,53 @@ std::string GetPlatformForUAMetadata() {
+@@ -645,7 +645,53 @@ std::string GetPlatformForUAMetadata() {
  #endif
  }
  
@@ -140,7 +140,7 @@ index 557eadb18229e..ef76932206b84 100644
  
    // Low entropy client hints.
 diff --git a/components/embedder_support/user_agent_utils.h b/components/embedder_support/user_agent_utils.h
-index 39a9d069561c6..e7274410cb167 100644
+index 39a9d06..e727441 100644
 --- a/components/embedder_support/user_agent_utils.h
 +++ b/components/embedder_support/user_agent_utils.h
 @@ -38,6 +38,13 @@ std::string GetUserAgent();
@@ -158,5 +158,5 @@ index 39a9d069561c6..e7274410cb167 100644
  // https://wicg.github.io/ua-client-hints/#sec-ch-ua-form-factors.
  std::vector<std::string> GetFormFactorsClientHint(
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

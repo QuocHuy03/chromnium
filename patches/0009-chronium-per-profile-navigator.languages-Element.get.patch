@@ -1,7 +1,7 @@
-From 53e0fb328470f72dca677c17e899a3317b7365a1 Mon Sep 17 00:00:00 2001
+From 4cdbb56f265e0b07844f0411b6499b653bb42bba Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Mon, 8 Jun 2026 08:41:24 +0700
-Subject: [PATCH 09/14] chronium: per-profile navigator.languages +
+Subject: [PATCH 09/20] chronium: per-profile navigator.languages +
  Element.getBoundingClientRect sub-pixel noise
 
 Two surfaces in one patch; both share the FingerprintState plumbing.
@@ -45,22 +45,22 @@ Files touched:
 - third_party/blink/renderer/core/dom/element.cc
 ---
  .../browser/chrome_content_browser_client.cc  |  5 ++++
- .../fingerprint/fingerprint_profile.cc        | 25 ++++++++++++++++
+ .../fingerprint/fingerprint_profile.cc        | 25 +++++++++++++++++
  .../browser/fingerprint/fingerprint_profile.h |  3 ++
  chrome/common/chrome_switches.cc              |  1 +
  chrome/common/chrome_switches.h               |  4 +++
  .../chrome_content_renderer_client.cc         |  5 ++++
- .../blink/renderer/core/dom/element.cc        | 29 ++++++++++++++++++-
+ .../blink/renderer/core/dom/element.cc        | 28 +++++++++++++++++--
  .../renderer/core/frame/navigator_language.cc |  9 ++++++
  .../platform/fingerprint/fingerprint_state.cc | 23 +++++++++++++++
  .../platform/fingerprint/fingerprint_state.h  |  5 ++++
- 10 files changed, 108 insertions(+), 1 deletion(-)
+ 10 files changed, 105 insertions(+), 3 deletions(-)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 4f8cf8f59b8d2..6fb3344b4fd6e 100644
+index ab9b3d0..de8c769 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2846,6 +2846,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2936,6 +2936,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
          command_line->AppendSwitchASCII(switches::kFingerprintWebRtcPolicy,
                                          webrtc);
        }
@@ -73,7 +73,7 @@ index 4f8cf8f59b8d2..6fb3344b4fd6e 100644
    }
  #if BUILDFLAG(IS_MAC)
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index d9429a5297669..4468633faacbc 100644
+index d9429a5..4468633 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -177,6 +177,31 @@ std::string FingerprintProfile::WebRtcPolicyValue() const {
@@ -109,7 +109,7 @@ index d9429a5297669..4468633faacbc 100644
    std::string contents;
    if (!base::ReadFileToString(path, &contents)) {
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index 80a62f4feb8ac..cb9a3b2add1a4 100644
+index 80a62f4..cb9a3b2 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -88,6 +88,9 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
@@ -123,10 +123,10 @@ index 80a62f4feb8ac..cb9a3b2add1a4 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index eff84f980c9c2..7f66f096afec3 100644
+index c0248bc..05e1ac7 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -367,6 +367,7 @@ const char kFingerprintScreen[] = "fingerprint-screen";
+@@ -384,6 +384,7 @@ const char kFingerprintScreen[] = "fingerprint-screen";
  const char kFingerprintHardware[] = "fingerprint-hardware";
  const char kFingerprintBattery[] = "fingerprint-battery";
  const char kFingerprintWebRtcPolicy[] = "fingerprint-webrtc-policy";
@@ -135,10 +135,10 @@ index eff84f980c9c2..7f66f096afec3 100644
  // Does not show the crash restore bubble when the browser is started during the
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index b3bfa860997d9..5792fe4f4c6e9 100644
+index 3fc6db8..3bf1c32 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -159,6 +159,10 @@ extern const char kFingerprintBattery[];
+@@ -162,6 +162,10 @@ extern const char kFingerprintBattery[];
  // 2=public_only.
  extern const char kFingerprintWebRtcPolicy[];
  
@@ -150,10 +150,10 @@ index b3bfa860997d9..5792fe4f4c6e9 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 64f6e52e2803f..d19f6021cf158 100644
+index 72a15ba..9f089ef 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -469,6 +469,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -472,6 +472,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
        blink::FingerprintState::SetWebRtcPolicy(
            static_cast<blink::FingerprintState::WebRtcPolicy>(wp));
      }
@@ -166,18 +166,18 @@ index 64f6e52e2803f..d19f6021cf158 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/core/dom/element.cc b/third_party/blink/renderer/core/dom/element.cc
-index 2c19d148ef86a..15e864c622cda 100644
+index 46a9172..2384dca 100644
 --- a/third_party/blink/renderer/core/dom/element.cc
 +++ b/third_party/blink/renderer/core/dom/element.cc
-@@ -282,6 +282,7 @@
+@@ -304,6 +304,7 @@
  #include "third_party/blink/renderer/platform/bindings/v8_dom_activity_logger.h"
  #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
  #include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 +#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
  #include "third_party/blink/renderer/platform/geometry/calculation_value.h"
+ #include "third_party/blink/renderer/platform/graphics/paint/tracked_element_data.h"
  #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
- #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-@@ -3462,6 +3463,11 @@ DOMRectList* Element::getClientRects() {
+@@ -3369,6 +3370,11 @@ DOMRectList* Element::getClientRects() {
      GetDocument().AdjustRectForScrollAndAbsoluteZoom(rect,
                                                       *element_layout_object);
    }
@@ -189,18 +189,17 @@ index 2c19d148ef86a..15e864c622cda 100644
    return MakeGarbageCollected<DOMRectList>(rects);
  }
  
-@@ -3514,7 +3520,28 @@ gfx::RectF Element::GetBoundingClientRectNoLifecycleUpdate() const {
+@@ -3456,9 +3462,25 @@ gfx::RectF Element::GetBoundingClientRectNoLifecycleUpdate() const {
+ }
+ 
  DOMRect* Element::GetBoundingClientRect() {
-   GetDocument().EnsurePaintLocationDataValidForNode(
-       this, DocumentUpdateReason::kJavaScript);
+-  GetDocument().UpdateStyleAndLayoutForNode(this,
+-                                            DocumentUpdateReason::kJavaScript);
 -  return DOMRect::FromRectF(GetBoundingClientRectNoLifecycleUpdate());
++  GetDocument().EnsurePaintLocationDataValidForNode(
++      this, DocumentUpdateReason::kJavaScript);
 +  DOMRect* result =
 +      DOMRect::FromRectF(GetBoundingClientRectNoLifecycleUpdate());
-+  // Chronium: seeded sub-pixel noise (~1e-5 magnitude) on each component.
-+  // Applied on DOMRect (double precision) AFTER conversion so the noise
-+  // isn't lost to gfx::RectF's float32 epsilon (~3e-5 at typical layout
-+  // magnitudes). Per-profile-stable but cross-profile-divergent; rendering
-+  // and layout are unaffected because this rect is JS-only read-back.
 +  if (FingerprintState::IsActive()) {
 +    auto noise = [](uint32_t h) -> double {
 +      return (static_cast<double>(h) * (1.0 / 2147483648.0) - 1.0) * 1e-5;
@@ -220,7 +219,7 @@ index 2c19d148ef86a..15e864c622cda 100644
  
  DOMRect* Element::GetBoundingClientRectForBinding() {
 diff --git a/third_party/blink/renderer/core/frame/navigator_language.cc b/third_party/blink/renderer/core/frame/navigator_language.cc
-index 75cd3461317b7..9902be434545c 100644
+index 75cd346..9902be4 100644
 --- a/third_party/blink/renderer/core/frame/navigator_language.cc
 +++ b/third_party/blink/renderer/core/frame/navigator_language.cc
 @@ -9,6 +9,7 @@
@@ -247,7 +246,7 @@ index 75cd3461317b7..9902be434545c 100644
    probe::ApplyAcceptLanguageOverride(execution_context_,
                                       &accept_languages_override);
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 3c522cfe7274c..90edcf8e1c7f4 100644
+index 3c522cf..90edcf8 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -39,6 +39,12 @@ std::string& PlatformStorage() {
@@ -288,7 +287,7 @@ index 3c522cfe7274c..90edcf8e1c7f4 100644
  void FingerprintState::SetScreen(const ScreenFp& screen) {
    if (g_screen_set.load(std::memory_order_acquire) || screen.width <= 0 ||
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index e42edf279c9a0..292321f8a93ed 100644
+index e42edf2..292321f 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -45,6 +45,11 @@ class PLATFORM_EXPORT FingerprintState {
@@ -304,5 +303,5 @@ index e42edf279c9a0..292321f8a93ed 100644
    static std::string_view WebGLUnmaskedVendor();
    static std::string_view WebGLUnmaskedRenderer();
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

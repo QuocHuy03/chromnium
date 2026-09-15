@@ -1,4 +1,4 @@
-From d0d0124c16832703b6bc6743c0f0a48ec8d1d654 Mon Sep 17 00:00:00 2001
+From ef8aec3937ce5fe678dd3ba693dd0ab7c161435a Mon Sep 17 00:00:00 2001
 From: Chronium <chronium@interlink.local>
 Date: Tue, 15 Sep 2026 13:48:28 +0700
 Subject: [PATCH 20/20] chronium: render-time noise v2, per-context WebGL
@@ -54,16 +54,16 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
  .../renderer/modules/webaudio/audio_buffer.cc |  34 +---
  .../renderer/modules/webaudio/audio_buffer.h  |   5 -
  .../modules/webaudio/offline_audio_context.cc |  36 ++++
- .../webgl/webgl_rendering_context_base.cc     | 167 +++++++++++++++---
+ .../webgl/webgl_rendering_context_base.cc     | 166 +++++++++++++++---
  .../platform/fingerprint/fingerprint_state.cc | 155 +++++++++++++---
  .../platform/fingerprint/fingerprint_state.h  |  51 +++++-
- 15 files changed, 616 insertions(+), 134 deletions(-)
+ 15 files changed, 615 insertions(+), 134 deletions(-)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 9c4ff4f..8259d68 100644
+index ae41cc7..1fecf38 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2903,6 +2903,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2993,6 +2993,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
              switches::kFingerprintWebGLExtensions,
              base::HexEncode(base::as_byte_span(webgl_exts)));
        }
@@ -76,7 +76,7 @@ index 9c4ff4f..8259d68 100644
        const std::string webgl_params = fp->WebGLParamsBlob();
        if (!webgl_params.empty()) {
          // Hex-encode for the same argv-tab/newline reason. Renderer
-@@ -2916,6 +2922,21 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -3006,6 +3012,21 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
          command_line->AppendSwitchASCII(switches::kFingerprintAudioNoise,
                                          audio_noise);
        }
@@ -258,10 +258,10 @@ index 81803da..24e0f96 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 89d305a..735554d 100644
+index e2efd57..c9ac3c2 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -379,6 +379,11 @@ const char kFingerprintWebAuthnUvpa[] = "fingerprint-webauthn-uvpa";
+@@ -396,6 +396,11 @@ const char kFingerprintWebAuthnUvpa[] = "fingerprint-webauthn-uvpa";
  const char kFingerprintWebGLExtensions[] = "fingerprint-webgl-extensions";
  const char kFingerprintWebGLParams[] = "fingerprint-webgl-params";
  const char kFingerprintAudioNoise[] = "fingerprint-audio-noise";
@@ -274,10 +274,10 @@ index 89d305a..735554d 100644
  const char kLicenseNonce[] = "license-nonce";
  const char kLicenseToken[] = "license-token";
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index 9625bb6..419b89d 100644
+index 0e73f03..f1ea3c2 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -197,11 +197,14 @@ extern const char kFingerprintSpeechVoices[];
+@@ -200,11 +200,14 @@ extern const char kFingerprintSpeechVoices[];
  // override. "0" = force false, "1" = force true, absent = no override.
  extern const char kFingerprintWebAuthnUvpa[];
  
@@ -293,7 +293,7 @@ index 9625bb6..419b89d 100644
  // Chronium (internal): WebGL getParameter() + getShaderPrecisionFormat()
  // surface override. TSV blob (hex-encoded; same encoding rationale as
  // the extension list above) where every line is one of:
-@@ -230,12 +233,24 @@ extern const char kLicenseToken[];
+@@ -233,12 +236,24 @@ extern const char kLicenseToken[];
  // Empty / absent = no chip rendered (vanilla LocationBarView).
  extern const char kAccountLabel[];
  
@@ -323,10 +323,10 @@ index 9625bb6..419b89d 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 93671af..04d52ae 100644
+index 445eb42..9164bd9 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -563,6 +563,16 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -566,6 +566,16 @@ void ChromeContentRendererClient::RenderThreadStarted() {
          blink::FingerprintState::SetWebGLExtensions(exts_blob);
        }
      }
@@ -343,7 +343,7 @@ index 93671af..04d52ae 100644
      const std::string webgl_params_hex =
          cmd_line->GetSwitchValueASCII(switches::kFingerprintWebGLParams);
      if (!webgl_params_hex.empty()) {
-@@ -575,8 +585,27 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -578,8 +588,27 @@ void ChromeContentRendererClient::RenderThreadStarted() {
      }
      const std::string audio_noise =
          cmd_line->GetSwitchValueASCII(switches::kFingerprintAudioNoise);
@@ -374,7 +374,7 @@ index 93671af..04d52ae 100644
    }
  
 diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-index 31f0770..369e0cb 100644
+index fd96fc1..b72beb0 100644
 --- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 +++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 @@ -147,10 +147,11 @@ namespace {
@@ -392,10 +392,10 @@ index 31f0770..369e0cb 100644
    }
    PaintImage paint_image = input->PaintImageForCurrentFrame();
 diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-index 6f73b8f..b2e8134 100644
+index 260a6f7..f5d044b 100644
 --- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
 +++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-@@ -532,7 +532,7 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+@@ -514,7 +514,7 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
        SkIRect bounds =
            snapshot->PaintImageForCurrentFrame().GetSkImageInfo().bounds();
        DCHECK(!bounds.intersect(SkIRect::MakeXYWH(sx, sy, sw, sh)));
@@ -404,7 +404,7 @@ index 6f73b8f..b2e8134 100644
                 image_data_pixmap.info().bytesPerPixel() == 4 &&
                 image_data_pixmap.writable_addr() != nullptr) {
        // Chronium: per-profile seeded noise on the returned pixel buffer.
-@@ -1128,6 +1128,19 @@ void BaseRenderingContext2D::DrawTextInternal(
+@@ -1143,6 +1143,19 @@ void BaseRenderingContext2D::DrawTextInternal(
      InflateStrokeRect(bounds);
    }
  
@@ -424,7 +424,7 @@ index 6f73b8f..b2e8134 100644
    if (use_max_width) {
      paint_canvas->save();
      // We draw when fontWidth is 0 so compositing operations (eg, a "copy" op)
-@@ -1141,8 +1154,9 @@ void BaseRenderingContext2D::DrawTextInternal(
+@@ -1156,8 +1169,9 @@ void BaseRenderingContext2D::DrawTextInternal(
    Draw<OverdrawOp::kNone>(
        /*draw_func=*/
        [font, text = std::move(text), direction, bidi_override, location,
@@ -436,7 +436,7 @@ index 6f73b8f..b2e8134 100644
          TextRun text_run(text, direction, bidi_override);
          // Font::DrawType::kGlyphsAndClusters is required for printing to PDF,
          // otherwise the character to glyph mapping will not be reversible,
-@@ -1156,9 +1170,18 @@ void BaseRenderingContext2D::DrawTextInternal(
+@@ -1171,9 +1185,18 @@ void BaseRenderingContext2D::DrawTextInternal(
          Font::DrawType draw_type = (canvas && canvas->IsPrinting())
                                         ? Font::DrawType::kGlyphsAndClusters
                                         : Font::DrawType::kGlyphsOnly;
@@ -579,7 +579,7 @@ index 4acd8a7..eaca14a 100644
  
  void AnalyserNode::getByteTimeDomainData(NotShared<DOMUint8Array> array) {
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
-index a805f14..7bf4c25 100644
+index 10bda77..182d718 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
 +++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
 @@ -38,7 +38,6 @@
@@ -590,7 +590,7 @@ index a805f14..7bf4c25 100644
  #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
  
  namespace blink {
-@@ -210,35 +209,10 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
+@@ -214,35 +213,10 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
      return NotShared<DOMFloat32Array>(nullptr);
    }
  
@@ -631,10 +631,10 @@ index a805f14..7bf4c25 100644
  }
  
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.h b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
-index b65558e..2e798e3 100644
+index 2188e9f..4bbf70b 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_buffer.h
 +++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
-@@ -127,11 +127,6 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
+@@ -123,11 +123,6 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
    uint32_t length_;
  
    HeapVector<Member<DOMFloat32Array>> channels_;
@@ -647,7 +647,7 @@ index b65558e..2e798e3 100644
  
  // Shared data that audio threads can hold onto.
 diff --git a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
-index 626582e..9c1648c 100644
+index 4604be6..2dbaabf 100644
 --- a/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
 +++ b/third_party/blink/renderer/modules/webaudio/offline_audio_context.cc
 @@ -35,6 +35,7 @@
@@ -658,7 +658,7 @@ index 626582e..9c1648c 100644
  #include "third_party/blink/renderer/modules/webaudio/audio_listener.h"
  #include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
  #include "third_party/blink/renderer/modules/webaudio/offline_audio_completion_event.h"
-@@ -43,6 +44,7 @@
+@@ -44,6 +45,7 @@
  #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
  #include "third_party/blink/renderer/platform/bindings/exception_state.h"
  #include "third_party/blink/renderer/platform/bindings/script_state.h"
@@ -666,7 +666,7 @@ index 626582e..9c1648c 100644
  #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
  #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
  #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
-@@ -398,6 +400,38 @@ ScriptPromise<IDLUndefined> OfflineAudioContext::resumeContext(
+@@ -416,6 +418,38 @@ ScriptPromise<IDLUndefined> OfflineAudioContext::resumeContext(
    return ToResolvedUndefinedPromise(script_state);
  }
  
@@ -705,7 +705,7 @@ index 626582e..9c1648c 100644
  void OfflineAudioContext::FireCompletionEvent() {
    DCHECK(IsMainThread());
  
-@@ -419,6 +453,8 @@ void OfflineAudioContext::FireCompletionEvent() {
+@@ -437,6 +471,8 @@ void OfflineAudioContext::FireCompletionEvent() {
        return;
      }
  
@@ -715,12 +715,12 @@ index 626582e..9c1648c 100644
      // promise too.
      DispatchEvent(*OfflineAudioCompletionEvent::Create(rendered_buffer));
 diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-index e13d6bd..399139d 100644
+index 317c4a4..e204bcd 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-@@ -25,7 +25,9 @@
+@@ -27,7 +27,9 @@
  
- #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+ #include <inttypes.h>
  
 +#include <algorithm>
  #include <memory>
@@ -728,7 +728,7 @@ index e13d6bd..399139d 100644
  #include <utility>
  
  #include "base/bit_cast.h"
-@@ -37,6 +39,11 @@
+@@ -39,6 +41,10 @@
  #include "base/metrics/histogram_macros.h"
  #include "base/notimplemented.h"
  #include "base/numerics/checked_math.h"
@@ -736,11 +736,10 @@ index e13d6bd..399139d 100644
 +#include "base/strings/strcat.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/strings/string_util.h"
-+#include "base/strings/stringprintf.h"
+ #include "base/strings/stringprintf.h"
  #include "base/synchronization/lock.h"
  #include "base/task/single_thread_task_runner.h"
- #include "base/trace_event/trace_event.h"
-@@ -3670,6 +3677,39 @@ bool WebGLRenderingContextBase::TimerQueryExtensionsEnabled() {
+@@ -3873,6 +3879,39 @@ bool WebGLRenderingContextBase::TimerQueryExtensionsEnabled() {
                .IsWorkaroundEnabled(gpu::ENABLE_WEBGL_TIMER_QUERY_EXTENSIONS));
  }
  
@@ -780,7 +779,7 @@ index e13d6bd..399139d 100644
  ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
                                                       const String& name) {
    ExecutionContext* context = ExecutionContext::From(script_state);
-@@ -3678,7 +3718,15 @@ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
+@@ -3881,7 +3920,15 @@ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
      UseCounter::Count(context, WebFeature::kWebGLDebugRendererInfo);
    }
  
@@ -797,7 +796,7 @@ index e13d6bd..399139d 100644
    return ScriptObject(
        script_state->GetIsolate(),
        ToV8Traits<IDLNullable<WebGLExtension>>::ToV8(script_state, extension));
-@@ -4380,26 +4428,21 @@ WebGLRenderingContextBase::getSupportedExtensions() {
+@@ -4583,26 +4630,21 @@ WebGLRenderingContextBase::getSupportedExtensions() {
    if (isContextLost())
      return std::nullopt;
  
@@ -836,7 +835,7 @@ index e13d6bd..399139d 100644
        result.push_back(tracker->ExtensionName());
      }
    }
-@@ -5331,6 +5374,79 @@ void WebGLRenderingContextBase::scissor(GLint x,
+@@ -5534,6 +5576,79 @@ void WebGLRenderingContextBase::scissor(GLint x,
    ContextGL()->Scissor(x, y, width, height);
  }
  
@@ -916,7 +915,7 @@ index e13d6bd..399139d 100644
  void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
                                               const String& string) {
    if (!ValidateWebGLProgramOrShader("shaderSource", shader))
-@@ -5338,8 +5454,19 @@ void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
+@@ -5541,8 +5656,19 @@ void WebGLRenderingContextBase::shaderSource(WebGLShader* shader,
    String ascii_string = ReplaceNonASCII(string).Result();
    shader->SetSource(string);
    DCHECK(ascii_string.Is8Bit() && ascii_string.ContainsOnlyAsciiOrEmpty());

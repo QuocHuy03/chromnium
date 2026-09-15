@@ -1,19 +1,18 @@
-From 99e52d0386458d30f28169f638e6fd8605e0065a Mon Sep 17 00:00:00 2001
+From 48a0a73c07b4bd2451bcb4900dbcfdcee46d5b3d Mon Sep 17 00:00:00 2001
 From: Chronium <chronium@interlink.local>
 Date: Tue, 15 Sep 2026 13:48:27 +0700
 Subject: [PATCH 19/20] chronium: patches 0019+0020+0021 (post-patched
  snapshot)
 
 ---
- chrome/browser/BUILD.gn                       |   3 +
  chrome/browser/chrome_browser_main.cc         |  61 +++++
  .../browser/chrome_content_browser_client.cc  |  43 +++
  .../fingerprint/fingerprint_profile.cc        |  93 +++++++
  .../browser/fingerprint/fingerprint_profile.h |  13 +
  chrome/browser/license/license_gate.cc        | 158 ++++++++++++
  chrome/browser/license/license_gate.h         |  29 +++
- .../views/location_bar/location_bar_view.cc   |  51 ++++
- .../ui/views/location_bar/location_bar_view.h |   6 +
+ .../views/location_bar/location_bar_view.cc   |  52 ++++
+ .../ui/views/location_bar/location_bar_view.h |   2 +
  chrome/common/chrome_switches.cc              |   6 +
  chrome/common/chrome_switches.h               |  34 +++
  .../chrome_content_renderer_client.cc         |  15 ++
@@ -24,29 +23,15 @@ Subject: [PATCH 19/20] chronium: patches 0019+0020+0021 (post-patched
  .../webgl/webgl_rendering_context_base.cc     |  47 ++++
  .../platform/fingerprint/fingerprint_state.cc | 244 +++++++++++++++++-
  .../platform/fingerprint/fingerprint_state.h  |  40 +++
- 19 files changed, 841 insertions(+), 16 deletions(-)
+ 18 files changed, 835 insertions(+), 16 deletions(-)
  create mode 100644 chrome/browser/license/license_gate.cc
  create mode 100644 chrome/browser/license/license_gate.h
 
-diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index c923a67..ac5d838 100644
---- a/chrome/browser/BUILD.gn
-+++ b/chrome/browser/BUILD.gn
-@@ -3471,6 +3471,9 @@ static_library("browser") {
-       "enterprise/signals/device_info_fetcher.h",
-       "fingerprint/fingerprint_profile.cc",
-       "fingerprint/fingerprint_profile.h",
-+      "license/license_gate.cc",
-+      "license/license_gate.h",
-+      "license/license_secret.h",
-       "first_run/bookmark_importer.cc",
-       "first_run/bookmark_importer.h",
-       "first_run/first_run.cc",
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index a59d979..f685023 100644
+index 306ea1c..7b4566c 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
-@@ -39,10 +39,13 @@
+@@ -41,10 +41,13 @@
  #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
  #include "chrome/browser/enterprise/chrome_browser_main_extra_parts_enterprise.h"
  #include "chrome/browser/fingerprint/fingerprint_profile.h"
@@ -60,7 +45,7 @@ index a59d979..f685023 100644
  #include "chrome/browser/first_run/first_run_features.h"
  #include "chrome/browser/gpu/chrome_browser_main_extra_parts_gpu.h"
  #include "chrome/browser/language/url_language_histogram_factory.h"
-@@ -1208,6 +1211,13 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1252,6 +1255,13 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
  
    DCHECK(!user_data_dir_.empty());
  
@@ -74,7 +59,7 @@ index a59d979..f685023 100644
    // Chronium: load per-profile fingerprint config from
    // --fingerprint-profile=<path> as early as possible so all downstream
    // singletons see it. Missing/malformed file is non-fatal — patches fall
-@@ -1243,6 +1253,36 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1287,6 +1297,36 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
            embedder_support::SetChroniumUserAgentMetadataOverride(
                std::move(*metadata));
          }
@@ -111,7 +96,7 @@ index a59d979..f685023 100644
        }
      }
    }
-@@ -1889,6 +1929,27 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
+@@ -1941,6 +1981,27 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
      return content::RESULT_CODE_NORMAL_EXIT;
    }
  
@@ -140,18 +125,18 @@ index a59d979..f685023 100644
    // The first run sentinel must be created after the process singleton was
    // grabbed (where enabled) and no early return paths were otherwise hit above.
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 5fc4e7b..9c4ff4f 100644
+index 87c7cf8..ae41cc7 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -307,6 +307,7 @@
- #include "components/safe_browsing/core/common/hashprefix_realtime/hash_realtime_utils.h"
+@@ -323,6 +323,7 @@
  #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+ #include "components/search/ntp_features.h"
  #include "components/search_engines/search_engines_switches.h"
 +#include "ui/base/ui_base_switches.h"
  #include "components/search_engines/template_url_service.h"
  #include "components/security_state/core/security_state.h"
  #include "components/site_isolation/features.h"
-@@ -2902,6 +2903,33 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2992,6 +2993,33 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
              switches::kFingerprintWebGLExtensions,
              base::HexEncode(base::as_byte_span(webgl_exts)));
        }
@@ -185,7 +170,7 @@ index 5fc4e7b..9c4ff4f 100644
      }
    }
  #if BUILDFLAG(IS_MAC)
-@@ -3279,6 +3307,21 @@ ChromeContentBrowserClient::GetQuarantineConnectionCallback() {
+@@ -3384,6 +3412,21 @@ ChromeContentBrowserClient::GetQuarantineConnectionCallback() {
  }
  
  std::string ChromeContentBrowserClient::GetApplicationLocale() {
@@ -542,21 +527,21 @@ index 0000000..b376763
 +
 +#endif  // CHROME_BROWSER_LICENSE_LICENSE_GATE_H_
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index a503997..11247fe 100644
+index 335b290..14eb2fe 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -16,7 +16,10 @@
+@@ -14,6 +14,10 @@
+ #include "base/functional/bind.h"
  #include "base/functional/callback_helpers.h"
- #include "base/i18n/rtl.h"
  #include "base/metrics/field_trial_params.h"
 +#include "base/command_line.h"
 +#include "base/hash/hash.h"
- #include "base/strings/utf_string_conversions.h"
++#include "base/strings/utf_string_conversions.h"
 +#include "chrome/common/chrome_switches.h"
  #include "base/trace_event/trace_event.h"
- #include "base/trace_event/typed_macros.h"
  #include "build/build_config.h"
-@@ -328,6 +331,43 @@ void LocationBarView::Init() {
+ #include "chrome/app/vector_icons/vector_icons.h"
+@@ -302,6 +306,43 @@ void LocationBarView::Init() {
    const gfx::FontList& page_action_font_list = typography_provider.GetFont(
        CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_BODY_3_EMPHASIS);
  
@@ -600,7 +585,7 @@ index a503997..11247fe 100644
    auto location_icon_view =
        std::make_unique<LocationIconView>(omnibox_chip_font_list, this, this);
    location_icon_view->set_drag_controller(this);
-@@ -921,6 +961,17 @@ void LocationBarView::Layout(PassKey) {
+@@ -816,6 +857,17 @@ void LocationBarView::Layout(PassKey) {
      }
    }
  
@@ -619,27 +604,23 @@ index a503997..11247fe 100644
      location_icon_view_->SetVisible(false);
      leading_decorations.AddDecoration(
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 3195e87..a927fb8 100644
+index e5a30ce..3926b7d 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
-@@ -563,6 +563,12 @@ class LocationBarView
-   std::unique_ptr<MerchantTrustChipButtonController>
-       merchant_trust_chip_controller_;
+@@ -550,6 +550,8 @@ class LocationBarView
+       permission_dashboard_controller_;
+   raw_ptr<PermissionDashboardView> permission_dashboard_view_;
  
-+  // Chronium: account label chip (Multilogin-style). Renders the value
-+  // of --account-label= as a small rounded label to the left of the
-+  // security icon, so users running 10+ chronium windows can tell
-+  // them apart. nullptr when the switch is empty / absent.
++  // Chronium: account label chip; nullptr when --account-label= is absent.
 +  raw_ptr<views::Label> account_label_chip_ = nullptr;
-+
    // An icon to the left of the edit field: the HTTPS lock, blank page icon,
    // search icon, EV HTTPS bubble, etc.
    raw_ptr<LocationIconView> location_icon_view_ = nullptr;
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 6414d43..89d305a 100644
+index b8e651f..e2efd57 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -377,6 +377,12 @@ const char kFingerprintWebGLLimits[] = "fingerprint-webgl-limits";
+@@ -394,6 +394,12 @@ const char kFingerprintWebGLLimits[] = "fingerprint-webgl-limits";
  const char kFingerprintSpeechVoices[] = "fingerprint-speech-voices";
  const char kFingerprintWebAuthnUvpa[] = "fingerprint-webauthn-uvpa";
  const char kFingerprintWebGLExtensions[] = "fingerprint-webgl-extensions";
@@ -653,10 +634,10 @@ index 6414d43..89d305a 100644
  // Does not show the crash restore bubble when the browser is started during the
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index a62965c..9625bb6 100644
+index d56d1fb..0e73f03 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -202,6 +202,40 @@ extern const char kFingerprintWebAuthnUvpa[];
+@@ -205,6 +205,40 @@ extern const char kFingerprintWebAuthnUvpa[];
  // argv-splitting on whitespace.
  extern const char kFingerprintWebGLExtensions[];
  
@@ -698,10 +679,10 @@ index a62965c..9625bb6 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 6617b63..93671af 100644
+index 1adc37e..445eb42 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -563,6 +563,21 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -566,6 +566,21 @@ void ChromeContentRendererClient::RenderThreadStarted() {
          blink::FingerprintState::SetWebGLExtensions(exts_blob);
        }
      }
@@ -724,7 +705,7 @@ index 6617b63..93671af 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-index 0b8e160..31f0770 100644
+index a9e91ff..fd96fc1 100644
 --- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 +++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 @@ -173,7 +173,7 @@ scoped_refptr<StaticBitmapImage> ApplyCanvasFingerprintNoise(
@@ -746,10 +727,10 @@ index 0b8e160..31f0770 100644
      }
    }
 diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-index 86c5c36..6f73b8f 100644
+index 32b9257..260a6f7 100644
 --- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
 +++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-@@ -545,14 +545,14 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+@@ -527,14 +527,14 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
        const int width = image_data_pixmap.width();
        const int height = image_data_pixmap.height();
        for (int y = 0; y < height; ++y) {
@@ -789,10 +770,10 @@ index 2e76b54..4acd8a7 100644
    }
  }
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
-index 961f24e..a805f14 100644
+index ae195a9..10bda77 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
 +++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
-@@ -232,7 +232,7 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
+@@ -236,7 +236,7 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
            // so the change survives the multiply.
            const float signed_unit =
                (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
@@ -802,10 +783,10 @@ index 961f24e..a805f14 100644
          noised_channel_mask_ |= bit;
        }
 diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-index 273d4ea..e13d6bd 100644
+index 8a9739a..317c4a4 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
-@@ -3789,6 +3789,40 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+@@ -3992,6 +3992,40 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
                                                      GLenum pname) {
    if (isContextLost())
      return ScriptValue::CreateNull(script_state->GetIsolate());
@@ -846,7 +827,7 @@ index 273d4ea..e13d6bd 100644
    const int kIntZero = 0;
    switch (pname) {
      case GL_ACTIVE_TEXTURE:
-@@ -4316,6 +4350,19 @@ WebGLShaderPrecisionFormat* WebGLRenderingContextBase::getShaderPrecisionFormat(
+@@ -4519,6 +4553,19 @@ WebGLShaderPrecisionFormat* WebGLRenderingContextBase::getShaderPrecisionFormat(
  
    GLint range[2] = {0, 0};
    GLint precision = 0;

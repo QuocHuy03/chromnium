@@ -1,7 +1,7 @@
-From 9b7e64091b9fa9d65f0e677ab349bb20f9e8c6e9 Mon Sep 17 00:00:00 2001
+From d0fec6ccc0205a5c5ddd7f535b6ddaad2723216c Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Fri, 5 Jun 2026 17:34:03 +0700
-Subject: [PATCH 05/14] chronium: seeded sub-perceptible noise on AudioBuffer +
+Subject: [PATCH 05/20] chronium: seeded sub-perceptible noise on AudioBuffer +
  AnalyserNode
 
 Patches the two main audio fingerprint readback surfaces so that
@@ -45,7 +45,7 @@ Files touched:
  3 files changed, 82 insertions(+)
 
 diff --git a/third_party/blink/renderer/modules/webaudio/analyser_node.cc b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
-index 688a2fec77ee2..2e76b54279d69 100644
+index 688a2fe..2e76b54 100644
 --- a/third_party/blink/renderer/modules/webaudio/analyser_node.cc
 +++ b/third_party/blink/renderer/modules/webaudio/analyser_node.cc
 @@ -29,6 +29,7 @@
@@ -126,7 +126,7 @@ index 688a2fec77ee2..2e76b54279d69 100644
  
  void AnalyserNode::ReportDidCreate() {
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
-index 7084a5303edc0..961f24ee42099 100644
+index bc4c0c6..ae195a9 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
 +++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.cc
 @@ -38,6 +38,7 @@
@@ -137,7 +137,7 @@ index 7084a5303edc0..961f24ee42099 100644
  #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
  
  namespace blink {
-@@ -209,6 +210,35 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
+@@ -213,6 +214,35 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
      return NotShared<DOMFloat32Array>(nullptr);
    }
  
@@ -174,10 +174,10 @@ index 7084a5303edc0..961f24ee42099 100644
  }
  
 diff --git a/third_party/blink/renderer/modules/webaudio/audio_buffer.h b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
-index 2e798e3e5bae7..b65558ed17788 100644
+index 4bbf70b..2188e9f 100644
 --- a/third_party/blink/renderer/modules/webaudio/audio_buffer.h
 +++ b/third_party/blink/renderer/modules/webaudio/audio_buffer.h
-@@ -127,6 +127,11 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
+@@ -123,6 +123,11 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
    uint32_t length_;
  
    HeapVector<Member<DOMFloat32Array>> channels_;
@@ -190,5 +190,5 @@ index 2e798e3e5bae7..b65558ed17788 100644
  
  // Shared data that audio threads can hold onto.
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

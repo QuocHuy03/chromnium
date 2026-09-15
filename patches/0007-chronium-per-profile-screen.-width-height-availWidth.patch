@@ -1,7 +1,7 @@
-From b5ddc35de515fc96ee5517c2e3d1f4022c1ddf8e Mon Sep 17 00:00:00 2001
+From d1ead8cf609707eb553a1650020be19c15b86b9c Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Fri, 5 Jun 2026 18:33:31 +0700
-Subject: [PATCH 07/14] chronium: per-profile
+Subject: [PATCH 07/20] chronium: per-profile
  screen.{width,height,availWidth,availHeight,colorDepth} + devicePixelRatio
 
 Patches Screen and LocalDOMWindow so JS sees the profile's screen
@@ -47,10 +47,10 @@ Files touched:
  10 files changed, 121 insertions(+)
 
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 1feff0d1fd7ad..88bada72eb0db 100644
+index 7f32407..4bdfd3d 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2826,6 +2826,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2916,6 +2916,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
          command_line->AppendSwitchASCII(switches::kFingerprintPlatform,
                                          platform);
        }
@@ -63,7 +63,7 @@ index 1feff0d1fd7ad..88bada72eb0db 100644
    }
  #if BUILDFLAG(IS_MAC)
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index fff9735d62311..f88c04b973d5e 100644
+index fff9735..f88c04b 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -12,6 +12,7 @@
@@ -103,7 +103,7 @@ index fff9735d62311..f88c04b973d5e 100644
    std::string contents;
    if (!base::ReadFileToString(path, &contents)) {
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index 3915b2db375ad..c38f6caa992f2 100644
+index 3915b2d..c38f6ca 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -75,6 +75,10 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
@@ -118,10 +118,10 @@ index 3915b2db375ad..c38f6caa992f2 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 09a0725525350..96bff91ae6afe 100644
+index 25422f2..6dfbd87 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -361,6 +361,9 @@ const char kFingerprintWebGLRenderer[] = "fingerprint-webgl-renderer";
+@@ -378,6 +378,9 @@ const char kFingerprintWebGLRenderer[] = "fingerprint-webgl-renderer";
  // Chronium (internal): navigator.platform override.
  const char kFingerprintPlatform[] = "fingerprint-platform";
  
@@ -132,10 +132,10 @@ index 09a0725525350..96bff91ae6afe 100644
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
  // enabled, because the ChromeOS full restore notification is shown for the user
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index 9023e9a55ccf9..c47a21aa8fd9a 100644
+index fe95e1b..0429c04 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -145,6 +145,10 @@ extern const char kFingerprintWebGLRenderer[];
+@@ -148,6 +148,10 @@ extern const char kFingerprintWebGLRenderer[];
  // at browser startup.)
  extern const char kFingerprintPlatform[];
  
@@ -147,10 +147,10 @@ index 9023e9a55ccf9..c47a21aa8fd9a 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index d1a7ba4e653a6..9782af9bc8f15 100644
+index 1bc647e..0d40077 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -24,6 +24,7 @@
+@@ -25,6 +25,7 @@
  #include "base/process/current_process.h"
  #include "base/profiler/thread_group_profiler.h"
  #include "base/strings/string_number_conversions.h"
@@ -158,7 +158,7 @@ index d1a7ba4e653a6..9782af9bc8f15 100644
  #include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
  #include "base/task/single_thread_task_runner.h"
-@@ -408,6 +409,25 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -411,6 +412,25 @@ void ChromeContentRendererClient::RenderThreadStarted() {
      if (!platform.empty()) {
        blink::FingerprintState::SetPlatform(platform);
      }
@@ -185,18 +185,18 @@ index d1a7ba4e653a6..9782af9bc8f15 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
-index 51f03729c2d40..544c8a4a8ee28 100644
+index 74cc1c0..afe8f46 100644
 --- a/third_party/blink/renderer/core/frame/local_dom_window.cc
 +++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
-@@ -150,6 +150,7 @@
- #include "third_party/blink/renderer/core/view_transition/view_transition_supplement.h"
+@@ -149,6 +149,7 @@
  #include "third_party/blink/renderer/platform/back_forward_cache_buffer_limit_tracker.h"
+ #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
  #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 +#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
  #include "third_party/blink/renderer/platform/bindings/script_state.h"
  #include "third_party/blink/renderer/platform/bindings/source_location.h"
  #include "third_party/blink/renderer/platform/blob/blob_url.h"
-@@ -1799,6 +1800,10 @@ CSSStyleDeclaration* LocalDOMWindow::getComputedStyle(
+@@ -1932,6 +1933,10 @@ CSSStyleDeclaration* LocalDOMWindow::getComputedStyle(
  }
  
  double LocalDOMWindow::devicePixelRatio() const {
@@ -204,14 +204,14 @@ index 51f03729c2d40..544c8a4a8ee28 100644
 +      fp && fp->device_pixel_ratio > 0.0) {
 +    return fp->device_pixel_ratio;
 +  }
-   if (!GetFrame())
+   if (!GetFrame()) {
      return 0.0;
- 
+   }
 diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
-index 69ffc2b05f75d..45f5e72163fca 100644
+index ed50289..8bdaa45 100644
 --- a/third_party/blink/renderer/core/frame/screen.cc
 +++ b/third_party/blink/renderer/core/frame/screen.cc
-@@ -35,6 +35,7 @@
+@@ -36,6 +36,7 @@
  #include "third_party/blink/renderer/core/frame/local_frame.h"
  #include "third_party/blink/renderer/core/frame/settings.h"
  #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -219,7 +219,7 @@ index 69ffc2b05f75d..45f5e72163fca 100644
  #include "ui/display/screen_info.h"
  #include "ui/display/screen_infos.h"
  
-@@ -79,12 +80,18 @@ bool Screen::AreWebExposedScreenPropertiesEqual(
+@@ -88,12 +89,18 @@ bool Screen::AreWebExposedScreenPropertiesEqual(
  }
  
  int Screen::height() const {
@@ -238,7 +238,7 @@ index 69ffc2b05f75d..45f5e72163fca 100644
    if (!DomWindow())
      return 0;
    return GetRect(/*available=*/false).width();
-@@ -97,6 +104,11 @@ unsigned Screen::colorDepth() const {
+@@ -106,6 +113,11 @@ unsigned Screen::colorDepth() const {
    // https://drafts.csswg.org/cssom-view/#dom-screen-colordepth
    unsigned unknown_color_depth = 24u;
  
@@ -250,7 +250,7 @@ index 69ffc2b05f75d..45f5e72163fca 100644
    if (!DomWindow()) {
      return unknown_color_depth;
    }
-@@ -122,12 +134,18 @@ int Screen::availTop() const {
+@@ -131,12 +143,18 @@ int Screen::availTop() const {
  }
  
  int Screen::availHeight() const {
@@ -270,7 +270,7 @@ index 69ffc2b05f75d..45f5e72163fca 100644
      return 0;
    return GetRect(/*available=*/true).width();
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 74f2c7e486aad..0e49f25f0a839 100644
+index 74f2c7e..0e49f25 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -39,6 +39,13 @@ std::string& PlatformStorage() {
@@ -313,7 +313,7 @@ index 74f2c7e486aad..0e49f25f0a839 100644
  uint32_t FingerprintState::HashAt(std::string_view channel,
                                    uint32_t x,
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index 6b75aa527409b..8abf710dc63eb 100644
+index 6b75aa5..8abf710 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -50,6 +50,21 @@ class PLATFORM_EXPORT FingerprintState {
@@ -339,5 +339,5 @@ index 6b75aa527409b..8abf710dc63eb 100644
    // |channel| should be a short stable string identifying the fingerprint
    // surface, e.g. "canvas", "webgl-readpixels", "audio".
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 

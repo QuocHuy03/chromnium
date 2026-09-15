@@ -1,7 +1,7 @@
-From d6b15f97521d798df47fd45453dc77e34fb88202 Mon Sep 17 00:00:00 2001
+From 020c72d954bd87999cb373e1b072eb8c5aee366c Mon Sep 17 00:00:00 2001
 From: Chronium Build <chronium@interlink.local>
 Date: Fri, 5 Jun 2026 18:04:57 +0700
-Subject: [PATCH 06/14] chronium: per-profile navigator.userAgent +
+Subject: [PATCH 06/20] chronium: per-profile navigator.userAgent +
  navigator.platform + HTTP UA
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -73,10 +73,10 @@ Files touched:
  10 files changed, 92 insertions(+), 3 deletions(-)
 
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index 09c4540b4336f..62d0efc258821 100644
+index 642cec7..6bae14d 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
-@@ -40,6 +40,8 @@
+@@ -42,6 +42,8 @@
  #include "chrome/browser/enterprise/chrome_browser_main_extra_parts_enterprise.h"
  #include "chrome/browser/fingerprint/fingerprint_profile.h"
  #include "chrome/browser/first_run/bookmark_importer.h"
@@ -85,7 +85,7 @@ index 09c4540b4336f..62d0efc258821 100644
  #include "chrome/browser/first_run/first_run_features.h"
  #include "chrome/browser/gpu/chrome_browser_main_extra_parts_gpu.h"
  #include "chrome/browser/language/url_language_histogram_factory.h"
-@@ -1210,11 +1212,23 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1254,11 +1256,23 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
    // singletons see it. Missing/malformed file is non-fatal — patches fall
    // back to default behavior when FingerprintProfile::IsLoaded() is false.
    {
@@ -113,10 +113,10 @@ index 09c4540b4336f..62d0efc258821 100644
    }
  
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 8ba037c460f39..1feff0d1fd7ad 100644
+index 64e0390..7f32407 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -2821,6 +2821,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -2911,6 +2911,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
          command_line->AppendSwitchASCII(switches::kFingerprintWebGLRenderer,
                                          webgl_renderer);
        }
@@ -129,7 +129,7 @@ index 8ba037c460f39..1feff0d1fd7ad 100644
    }
  #if BUILDFLAG(IS_MAC)
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.cc b/chrome/browser/fingerprint/fingerprint_profile.cc
-index 43f44f8f71b2a..fff9735d62311 100644
+index 43f44f8..fff9735 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.cc
 +++ b/chrome/browser/fingerprint/fingerprint_profile.cc
 @@ -88,6 +88,22 @@ std::string FingerprintProfile::WebGLUnmaskedRenderer() const {
@@ -156,7 +156,7 @@ index 43f44f8f71b2a..fff9735d62311 100644
    std::string contents;
    if (!base::ReadFileToString(path, &contents)) {
 diff --git a/chrome/browser/fingerprint/fingerprint_profile.h b/chrome/browser/fingerprint/fingerprint_profile.h
-index eef348904783c..3915b2db375ad 100644
+index eef3489..3915b2d 100644
 --- a/chrome/browser/fingerprint/fingerprint_profile.h
 +++ b/chrome/browser/fingerprint/fingerprint_profile.h
 @@ -69,6 +69,12 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
@@ -173,10 +173,10 @@ index eef348904783c..3915b2db375ad 100644
    friend class base::NoDestructor<FingerprintProfile>;
    FingerprintProfile();
 diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
-index 0ee803d9014a9..09a0725525350 100644
+index a5ff3ff..25422f2 100644
 --- a/chrome/common/chrome_switches.cc
 +++ b/chrome/common/chrome_switches.cc
-@@ -358,6 +358,9 @@ const char kFingerprintSeedHex[] = "fingerprint-seed-hex";
+@@ -375,6 +375,9 @@ const char kFingerprintSeedHex[] = "fingerprint-seed-hex";
  const char kFingerprintWebGLVendor[] = "fingerprint-webgl-vendor";
  const char kFingerprintWebGLRenderer[] = "fingerprint-webgl-renderer";
  
@@ -187,10 +187,10 @@ index 0ee803d9014a9..09a0725525350 100644
  // system startup phase in ChromeOS, if the ChromeOS full restore feature is
  // enabled, because the ChromeOS full restore notification is shown for the user
 diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
-index a610f27250215..9023e9a55ccf9 100644
+index 865fd2e..fe95e1b 100644
 --- a/chrome/common/chrome_switches.h
 +++ b/chrome/common/chrome_switches.h
-@@ -139,6 +139,12 @@ extern const char kFingerprintSeedHex[];
+@@ -142,6 +142,12 @@ extern const char kFingerprintSeedHex[];
  extern const char kFingerprintWebGLVendor[];
  extern const char kFingerprintWebGLRenderer[];
  
@@ -204,10 +204,10 @@ index a610f27250215..9023e9a55ccf9 100644
  extern const char kHomePage[];
  #if !BUILDFLAG(IS_ANDROID)
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 351c491de17e1..d1a7ba4e653a6 100644
+index 6ded03f..1bc647e 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -403,6 +403,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+@@ -406,6 +406,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
      if (!webgl_vendor.empty() || !webgl_renderer.empty()) {
        blink::FingerprintState::SetWebGLStrings(webgl_vendor, webgl_renderer);
      }
@@ -220,7 +220,7 @@ index 351c491de17e1..d1a7ba4e653a6 100644
  
    main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
 diff --git a/third_party/blink/renderer/core/frame/navigator.cc b/third_party/blink/renderer/core/frame/navigator.cc
-index 583f05f8dd5fb..806af2d1d9149 100644
+index 583f05f..806af2d 100644
 --- a/third_party/blink/renderer/core/frame/navigator.cc
 +++ b/third_party/blink/renderer/core/frame/navigator.cc
 @@ -32,6 +32,7 @@
@@ -244,7 +244,7 @@ index 583f05f8dd5fb..806af2d1d9149 100644
    // the platform with a frozen platform to distinguish between
    // mobile and desktop when ReduceUserAgent is enabled.
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
-index 40299adcc9b83..74f2c7e486aad 100644
+index 40299ad..74f2c7e 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.cc
 @@ -33,6 +33,12 @@ std::string& WebGLRendererStorage() {
@@ -285,7 +285,7 @@ index 40299adcc9b83..74f2c7e486aad 100644
  uint32_t FingerprintState::HashAt(std::string_view channel,
                                    uint32_t x,
 diff --git a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
-index bcf852d88dce6..6b75aa527409b 100644
+index bcf852d..6b75aa5 100644
 --- a/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 +++ b/third_party/blink/renderer/platform/fingerprint/fingerprint_state.h
 @@ -41,9 +41,14 @@ class PLATFORM_EXPORT FingerprintState {
@@ -304,5 +304,5 @@ index bcf852d88dce6..6b75aa527409b 100644
    // Deterministic 32-bit hash of (process seed, channel, x, y).
    // |channel| should be a short stable string identifying the fingerprint
 -- 
-2.54.0.windows.1
+2.49.0.windows.1
 
