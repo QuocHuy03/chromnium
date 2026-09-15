@@ -575,8 +575,17 @@ void ChromeContentRendererClient::RenderThreadStarted() {
     }
     const std::string audio_noise =
         cmd_line->GetSwitchValueASCII(switches::kFingerprintAudioNoise);
-    if (!audio_noise.empty()) {
-      blink::FingerprintState::SetAudioNoise(audio_noise != "0");
+    double audio_amplitude = 0.0;
+    if (!audio_noise.empty() &&
+        base::StringToDouble(audio_noise, &audio_amplitude)) {
+      blink::FingerprintState::SetAudioNoiseAmplitude(
+          static_cast<float>(audio_amplitude));
+    }
+    const std::string readpixels_noise = cmd_line->GetSwitchValueASCII(
+        switches::kFingerprintWebGLReadPixelsNoise);
+    if (!readpixels_noise.empty()) {
+      blink::FingerprintState::SetWebGLReadPixelsNoise(readpixels_noise !=
+                                                       "0");
     }
   }
 

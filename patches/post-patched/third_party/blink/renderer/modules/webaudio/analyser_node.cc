@@ -25,6 +25,9 @@
 
 #include "third_party/blink/renderer/modules/webaudio/analyser_node.h"
 
+#include <cmath>
+
+#include "base/containers/span.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_analyser_options.h"
 #include "third_party/blink/renderer/modules/webaudio/analyser_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
@@ -119,40 +122,67 @@ double AnalyserNode::smoothingTimeConstant() const {
 
 // Chronium: applies seeded sub-perceptible noise to the user-supplied
 // AnalyserNode output buffer. The buffer is written by the analyser
-// handler then perturbed here, so every call sees a perturbed value but
-// the perturbation is deterministic per (profile, channel, index).
+// handler then perturbed here; the perturbation is deterministic per
+// (profile, channel, index), scaled by noise.audio_amplitude, and off
+// when the amplitude is 0. Silence is never perturbed.
 namespace {
 
-void NoiseFloatBuffer(DOMFloat32Array* array, const char* channel_name) {
-  if (!array || !FingerprintState::IsActive()) {
+float SignedUnit(uint32_t hash) {
+  return (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
+}
+
+// Frequency data is in dB (typically -100..0). At the legacy amplitude
+// (1e-5) this is the historical 1e-4 dB shift. -Infinity bins stay as-is.
+void NoiseFrequencyBuffer(DOMFloat32Array* array, const char* channel_name) {
+  if (!array || !FingerprintState::AudioNoiseEnabled()) {
     return;
   }
-  float* data = array->Data();
-  const unsigned len = array->length();
-  for (unsigned i = 0; i < len; ++i) {
-    const uint32_t hash = FingerprintState::HashAt(channel_name, 0u, i);
-    const float signed_unit =
-        (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
-    // Frequency data is in dB (typically -100..0). A 1e-4 perturbation
-    // shifts the hash without crossing rounding/quantization boundaries
-    // a fingerprinter would expect to be stable across runs of the same
-    // profile.
-    UNSAFE_TODO(data[i] += signed_unit * 1e-4f);
+  const float scale = FingerprintState::AudioNoiseAmplitude() * 10.0f;
+  base::span<float> data = array->AsSpan();
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (!std::isfinite(data[i])) {
+      continue;
+    }
+    data[i] += SignedUnit(FingerprintState::HashAt(
+                   channel_name, 0u, static_cast<uint32_t>(i))) *
+               scale;
+  }
+}
+
+// Time-domain samples get the same relative gain jitter as rendered
+// AudioBuffers; exact zeros stay zero.
+void NoiseTimeDomainBuffer(DOMFloat32Array* array, const char* channel_name) {
+  if (!array || !FingerprintState::AudioNoiseEnabled()) {
+    return;
+  }
+  const float amplitude = FingerprintState::AudioNoiseAmplitude();
+  base::span<float> data = array->AsSpan();
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (data[i] == 0.0f) {
+      continue;
+    }
+    data[i] *= 1.0f + SignedUnit(FingerprintState::HashAt(
+                          channel_name, 0u, static_cast<uint32_t>(i))) *
+                          amplitude;
   }
 }
 
 void NoiseByteBuffer(DOMUint8Array* array, const char* channel_name) {
-  if (!array || !FingerprintState::IsActive()) {
+  if (!array || !FingerprintState::AudioNoiseEnabled()) {
     return;
   }
-  uint8_t* data = array->Data();
-  const unsigned len = array->length();
-  for (unsigned i = 0; i < len; ++i) {
-    const uint32_t hash = FingerprintState::HashAt(channel_name, 0u, i);
-    // Flip LSB of ~1/256 entries; keeps the buffer visually identical for
-    // any reasonable consumer but changes the fingerprint hash.
+  base::span<uint8_t> data = array->AsSpan();
+  for (size_t i = 0; i < data.size(); ++i) {
+    // 0 / 255 (frequency floor / ceiling) and 128 (time-domain centre) are
+    // what silence reads as; flipping them would expose the noise.
+    if (data[i] == 0u || data[i] == 128u || data[i] == 255u) {
+      continue;
+    }
+    const uint32_t hash =
+        FingerprintState::HashAt(channel_name, 0u, static_cast<uint32_t>(i));
+    // Flip LSB of ~1/256 entries.
     if ((hash & 0xFFu) == 0u) {
-      UNSAFE_TODO(data[i] ^= 1u);
+      data[i] ^= 1u;
     }
   }
 }
@@ -162,7 +192,7 @@ void NoiseByteBuffer(DOMUint8Array* array, const char* channel_name) {
 void AnalyserNode::getFloatFrequencyData(NotShared<DOMFloat32Array> array) {
   GetAnalyserHandler().GetFloatFrequencyData(array.Get(),
                                              context()->currentTime());
-  NoiseFloatBuffer(array.Get(), "audio-freq-f");
+  NoiseFrequencyBuffer(array.Get(), "audio-freq-f");
 }
 
 void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
@@ -173,7 +203,7 @@ void AnalyserNode::getByteFrequencyData(NotShared<DOMUint8Array> array) {
 
 void AnalyserNode::getFloatTimeDomainData(NotShared<DOMFloat32Array> array) {
   GetAnalyserHandler().GetFloatTimeDomainData(array.Get());
-  NoiseFloatBuffer(array.Get(), "audio-time-f");
+  NoiseTimeDomainBuffer(array.Get(), "audio-time-f");
 }
 
 void AnalyserNode::getByteTimeDomainData(NotShared<DOMUint8Array> array) {

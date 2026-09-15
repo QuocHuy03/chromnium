@@ -170,8 +170,9 @@ uint64_t PrecisionKey(uint32_t shader_type, uint32_t precision_type) {
          static_cast<uint64_t>(precision_type);
 }
 
-std::atomic<bool> g_audio_noise_enabled{true};
-std::atomic<bool> g_audio_noise_set{false};
+// Legacy default: audio noise on at 1e-5 until the profile says otherwise.
+std::atomic<float> g_audio_noise_amplitude{1e-5f};
+std::atomic<bool> g_webgl_readpixels_noise{true};
 
 // xxHash-style scalar mix. Cryptographically weak but plenty good for
 // distinguishing fingerprints. Deterministic for the same (seed, channel,
@@ -707,14 +708,36 @@ std::tuple<int32_t, int32_t, int32_t> FingerprintState::WebGLShaderPrecision(
 }
 
 // static
-void FingerprintState::SetAudioNoise(bool enabled) {
-  g_audio_noise_enabled.store(enabled, std::memory_order_release);
-  g_audio_noise_set.store(true, std::memory_order_release);
+void FingerprintState::SetAudioNoiseAmplitude(float amplitude) {
+  // NaN / negative -> off. Above 1e-2 (-40 dB gain jitter) is audible and
+  // almost certainly a units mistake in the profile, so clamp.
+  if (!(amplitude > 0.0f)) {
+    amplitude = 0.0f;
+  } else if (amplitude > 1e-2f) {
+    amplitude = 1e-2f;
+  }
+  g_audio_noise_amplitude.store(amplitude, std::memory_order_release);
+}
+
+// static
+float FingerprintState::AudioNoiseAmplitude() {
+  return g_audio_noise_amplitude.load(std::memory_order_acquire);
 }
 
 // static
 bool FingerprintState::AudioNoiseEnabled() {
-  return g_audio_noise_enabled.load(std::memory_order_acquire);
+  return IsActive() && AudioNoiseAmplitude() > 0.0f;
+}
+
+// static
+void FingerprintState::SetWebGLReadPixelsNoise(bool enabled) {
+  g_webgl_readpixels_noise.store(enabled, std::memory_order_release);
+}
+
+// static
+bool FingerprintState::WebGLReadPixelsNoiseEnabled() {
+  return IsActive() &&
+         g_webgl_readpixels_noise.load(std::memory_order_acquire);
 }
 
 // static

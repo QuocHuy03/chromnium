@@ -5227,6 +5227,58 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
     }
     ContextGL()->ReadPixels(x, y, width, height, format, type, data);
   }
+
+  // Chronium: apply the same seeded "canvas" mask that toDataURL/toBlob
+  // (html_canvas_element.cc) and getImageData use, in canvas space, so
+  // readPixels, toDataURL and drawImage+getImageData agree pixel for pixel.
+  // Default framebuffer only: reads from app framebuffers are commonly GPU
+  // picking (object ids) and must stay exact. WebGL2 PIXEL_PACK_BUFFER reads
+  // never reach here (they go straight into a GPU buffer).
+  const WebGLImageConversion::PixelStoreParams pack = GetPackPixelStoreParams();
+  if (!framebuffer && FingerprintState::WebGLReadPixelsNoiseEnabled() &&
+      format == GL_RGBA && type == GL_UNSIGNED_BYTE && data && width > 0 &&
+      height > 0 && pack.alignment > 0 && pack.skip_pixels >= 0 &&
+      pack.skip_rows >= 0 &&
+      (pack.row_length <= 0 ||
+       static_cast<int64_t>(pack.skip_pixels) + width <= pack.row_length)) {
+    const gfx::Size buffer_size = GetDrawingBuffer()->Size();
+    // Row layout follows the pack params (WebGL2 adds PACK_ROW_LENGTH /
+    // PACK_SKIP_PIXELS / PACK_SKIP_ROWS), exactly as
+    // ValidateReadPixelsFuncParameters sized the destination.
+    const size_t alignment = static_cast<size_t>(pack.alignment);
+    const size_t row_pixels = static_cast<size_t>(
+        pack.row_length > 0 ? pack.row_length : width);
+    const size_t stride =
+        (row_pixels * 4u + alignment - 1u) / alignment * alignment;
+    const size_t first_row = static_cast<size_t>(pack.skip_rows) * stride;
+    const size_t skip_bytes = static_cast<size_t>(pack.skip_pixels) * 4u;
+    for (GLsizei r = 0; r < height; ++r) {
+      // GL rows are bottom-up; canvas snapshots are top-down.
+      // int64_t: y comes straight from script, y + r must not overflow.
+      const int64_t canvas_y = static_cast<int64_t>(buffer_size.height()) -
+                               1 - (static_cast<int64_t>(y) + r);
+      if (canvas_y < 0 || canvas_y >= buffer_size.height()) {
+        continue;
+      }
+      UNSAFE_TODO(uint8_t* row = data + first_row +
+                                 static_cast<size_t>(r) * stride + skip_bytes);
+      for (GLsizei c = 0; c < width; ++c) {
+        const int64_t canvas_x = static_cast<int64_t>(x) + c;
+        // Pixels outside the drawing buffer are not written by ReadPixels;
+        // leave them untouched.
+        if (canvas_x < 0 || canvas_x >= buffer_size.width()) {
+          continue;
+        }
+        const uint32_t hash = FingerprintState::HashAt(
+            "canvas", static_cast<uint32_t>(canvas_x),
+            static_cast<uint32_t>(canvas_y));
+        if ((hash & 0xFFu) == 0u) {
+          const uint32_t which = (hash >> 8) % 3u;  // R, G or B
+          UNSAFE_TODO(row[static_cast<size_t>(c) * 4u + which] ^= 1u);
+        }
+      }
+    }
+  }
 }
 
 void WebGLRenderingContextBase::RenderbufferStorageImpl(

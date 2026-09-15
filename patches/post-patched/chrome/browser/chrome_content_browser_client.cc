@@ -2916,6 +2916,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
         command_line->AppendSwitchASCII(switches::kFingerprintAudioNoise,
                                         audio_noise);
       }
+      const std::string readpixels_noise = fp->WebGLReadPixelsNoiseValue();
+      if (!readpixels_noise.empty()) {
+        command_line->AppendSwitchASCII(
+            switches::kFingerprintWebGLReadPixelsNoise, readpixels_noise);
+      }
       // Chronium: explicitly propagate the profile locale to children
       // via --lang. Renderer's ICU initialization reads this switch
       // BEFORE V8 wires up Intl, so Intl.DateTimeFormat().resolvedOptions()

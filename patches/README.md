@@ -43,6 +43,15 @@ When editing patches:
 | 0013 | UA Client Hints: full `blink::UserAgentMetadata` from JSON, drives every `Sec-CH-UA-*` request header AND `navigator.userAgentData.getHighEntropyValues()` | `0013-chronium-per-profile-UA-Client-Hints-via-...patch` |
 | 0014 | `permissions.query` DENIED→ASK for notifications/geolocation/audio/video/midi (matches `Notification.permission === 'default'`) + per-profile font enumeration allowlist (locally-installed fonts not in list become unavailable to `measureText`) | `0014-chronium-permissions.query-DENIED-ASK-per-profile-fo.patch` |
 | 0015 | `performance.memory.jsHeapSizeLimit` + `navigator.connection.{effectiveType,downlink,rtt,saveData}` + `navigator.storage.estimate().quota` + `speechSynthesis.getVoices()` (replaces OS voices with profile-pinned list) + WebGL `MAX_TEXTURE_SIZE`/`MAX_VERTEX_ATTRIBS` (parsing only, consumer left for follow-up) | `0015-chronium-add-memory-connection-storage-speech-...patch` |
+| 0022 | WebGL `readPixels` seeded noise (same "canvas" mask as `toDataURL`, `noise.webgl_readpixels`) + audio noise applied once at `OfflineAudioContext` render completion, scaled by `noise.audio_amplitude` (fixes CreepJS `data`≠`copy` and audio trap) | `0022-chronium-seeded-WebGL-readPixels-noise-render-time-a.patch` |
+
+**Known issue (Sep 2026):** the `0019`–`0021` `.patch` files do not apply
+on top of `0018` against upstream 148.0.7778.217 (context mismatch). The
+full-file copies in `post-patched/` are the source of truth for those three
+(the Linux workflow copies them over after `0018`). `0022` was generated
+against "upstream + 0001..0018 + post-patched snapshot", and `post-patched/`
+already contains its result. The V8 Intl changes (`v8/src/objects/
+js-date-time-format.cc`) exist only in `post-patched/`, with no `.patch`.
 
 ## Plan §0 hard requirements — coverage
 

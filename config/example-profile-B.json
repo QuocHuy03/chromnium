@@ -123,7 +123,7 @@
   "noise": {
     "canvas_threshold":      0.001,
     "webgl_readpixels":      true,
-    "audio_amplitude":       1e-7,
+    "audio_amplitude":       1e-5,
     "clientrects_subpixel":  1e-5,
     "measure_text_subpixel": 1e-5
   }

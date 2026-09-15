@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/fingerprint/fingerprint_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 
 namespace blink {
@@ -210,35 +209,10 @@ NotShared<DOMFloat32Array> AudioBuffer::getChannelData(
     return NotShared<DOMFloat32Array>(nullptr);
   }
 
-  // Chronium: apply seeded sub-perceptible noise on the FIRST JS-facing
-  // read of each channel. We hook the (unsigned, ExceptionState&) entry
-  // point — not the internal (unsigned) one — because internal C++ paths
-  // (e.g. SharedAudioBuffer ctor) call this *before* the audio render
-  // thread has written into the buffer; noising there would be overwritten.
-  // By the time JS observes the buffer, rendering is complete and this
-  // hook is the right place.
-  if (FingerprintState::IsActive() && channel_index < 32u) {
-    const uint32_t bit = 1u << channel_index;
-    if ((noised_channel_mask_ & bit) == 0u) {
-      DOMFloat32Array* arr = channels_[channel_index].Get();
-      if (arr) {
-        float* data = arr->Data();
-        const unsigned len = arr->length();
-        for (unsigned i = 0; i < len; ++i) {
-          const uint32_t hash =
-              FingerprintState::HashAt("audio", channel_index, i);
-          // Signed unit in roughly [-1, +1]; scale by 1e-5 (~-100 dB,
-          // inaudible) which is above float32's ~1.2e-7 relative epsilon
-          // so the change survives the multiply.
-          const float signed_unit =
-              (static_cast<float>(hash) * (1.0f / 2147483648.0f)) - 1.0f;
-          UNSAFE_TODO(data[i] *= 1.0f + signed_unit * 1e-5f);
-        }
-        noised_channel_mask_ |= bit;
-      }
-    }
-  }
-
+  // Chronium: no read-time noise here. Audio fingerprint noise is applied
+  // once to the rendered buffer in OfflineAudioContext::FireCompletionEvent,
+  // so every read path sees the same samples and script-written buffers
+  // read back exactly what was written.
   return getChannelData(channel_index);
 }
 

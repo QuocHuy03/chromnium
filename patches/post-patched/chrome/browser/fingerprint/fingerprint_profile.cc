@@ -525,14 +525,28 @@ std::string FingerprintProfile::AudioNoiseValue() const {
   if (!noise) {
     return {};
   }
-  // The profile JSON exposes audio_amplitude as the scale; treat 0 or
-  // negative as "noise disabled". Anything > 0 keeps the legacy noised
-  // path active.
+  // The renderer parses this as the relative gain-jitter amplitude
+  // (FingerprintState::SetAudioNoiseAmplitude); 0 or negative disables.
   std::optional<double> amp = noise->FindDouble("audio_amplitude");
   if (!amp.has_value()) {
     return {};
   }
-  return *amp > 0.0 ? "1" : "0";
+  return *amp > 0.0 ? base::NumberToString(*amp) : "0";
+}
+
+std::string FingerprintProfile::WebGLReadPixelsNoiseValue() const {
+  if (!loaded_) {
+    return {};
+  }
+  const base::DictValue* noise = dict_.FindDict("noise");
+  if (!noise) {
+    return {};
+  }
+  std::optional<bool> enabled = noise->FindBool("webgl_readpixels");
+  if (!enabled.has_value()) {
+    return {};
+  }
+  return *enabled ? "1" : "0";
 }
 
 bool FingerprintProfile::LoadFromFile(const base::FilePath& path) {

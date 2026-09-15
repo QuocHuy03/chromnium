@@ -217,14 +217,24 @@ class PLATFORM_EXPORT FingerprintState {
   static VoiceList SpeechVoices();
   static bool HasSpeechVoices();
 
-  // Per-vector noise enable. CreepJS / Pixelscan ship specific traps
-  // that detect when the audio sample stream is being perturbed (their
-  // "audio trap" hashes samples 80-90 and checks for the expected
-  // oscillator output) — a profile pinned to a real-but-vanilla device
-  // can opt out so the noise stops giving the spoof away. Default is
-  // enabled (legacy behavior) until SetAudioNoise(false) is called.
-  static void SetAudioNoise(bool enabled);
+  // Audio noise amplitude (noise.audio_amplitude): relative gain jitter
+  // applied ONCE to OfflineAudioContext render output (see
+  // OfflineAudioContext::FireCompletionEvent) and to AnalyserNode readouts.
+  // AudioBuffers created and filled by script are never perturbed, so
+  // CreepJS' audio "trap" (write known samples, read them back) stays
+  // exact and getChannelData/copyFromChannel always agree. 0 disables.
+  // Default 1e-5 (legacy) until set. Values below ~2e-7 are mostly lost
+  // to float32 rounding; the useful range is 1e-6..1e-4.
+  static void SetAudioNoiseAmplitude(float amplitude);
+  static float AudioNoiseAmplitude();
+  // True when IsActive() and the amplitude is > 0.
   static bool AudioNoiseEnabled();
+
+  // WebGL readPixels noise (noise.webgl_readpixels). Default enabled, to
+  // match toDataURL/toBlob on a WebGL canvas, which is always noised.
+  static void SetWebGLReadPixelsNoise(bool enabled);
+  // True when IsActive() and the profile did not disable it.
+  static bool WebGLReadPixelsNoiseEnabled();
 
   // Deterministic 32-bit hash of (process seed, channel, x, y).
   // |channel| should be a short stable string identifying the fingerprint

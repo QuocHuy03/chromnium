@@ -141,10 +141,14 @@ class FingerprintProfile : public chrome::mojom::FingerprintConfigProvider {
   // when neither key is set in the profile.
   std::string WebGLParamsBlob() const;
 
-  // AudioContext sample-noise enable. "1" = enabled (legacy), "0" =
-  // disabled. Empty when the profile doesn't explicitly set it (then
-  // the renderer keeps the historical default of enabled).
+  // noise.audio_amplitude as a decimal string (e.g. "1e-05"); "0" when
+  // disabled. Empty when the profile doesn't set it (the renderer then
+  // keeps the legacy default amplitude of 1e-5).
   std::string AudioNoiseValue() const;
+
+  // noise.webgl_readpixels: "1" / "0". Empty when the profile doesn't set
+  // it (the renderer default is enabled).
+  std::string WebGLReadPixelsNoiseValue() const;
 
  private:
   friend class base::NoDestructor<FingerprintProfile>;

@@ -379,6 +379,8 @@ const char kFingerprintWebAuthnUvpa[] = "fingerprint-webauthn-uvpa";
 const char kFingerprintWebGLExtensions[] = "fingerprint-webgl-extensions";
 const char kFingerprintWebGLParams[] = "fingerprint-webgl-params";
 const char kFingerprintAudioNoise[] = "fingerprint-audio-noise";
+const char kFingerprintWebGLReadPixelsNoise[] =
+    "fingerprint-webgl-readpixels-noise";
 const char kLicenseTs[]    = "license-ts";
 const char kLicenseNonce[] = "license-nonce";
 const char kLicenseToken[] = "license-token";

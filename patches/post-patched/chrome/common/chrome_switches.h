@@ -230,11 +230,15 @@ extern const char kLicenseToken[];
 // Empty / absent = no chip rendered (vanilla LocationBarView).
 extern const char kAccountLabel[];
 
-// Chronium (internal): AudioContext sample noise toggle. "0" = disable,
-// "1" = enable. Absent = enabled (legacy default). Set "0" when the
-// profile pins a real-but-vanilla device that anti-bot traps would
-// flag the noised samples on (creepjs / iphey).
+// Chronium (internal): audio noise amplitude from noise.audio_amplitude,
+// as a decimal string. "0" = disabled. Absent = legacy default (1e-5).
+// Applied once to OfflineAudioContext render output and to AnalyserNode
+// readouts; script-created AudioBuffers are never perturbed.
 extern const char kFingerprintAudioNoise[];
+
+// Chronium (internal): WebGL readPixels noise toggle from
+// noise.webgl_readpixels. "0" = disable, "1" = enable. Absent = enabled.
+extern const char kFingerprintWebGLReadPixelsNoise[];
 
 extern const char kHideCrashRestoreBubble[];
 extern const char kHomePage[];
