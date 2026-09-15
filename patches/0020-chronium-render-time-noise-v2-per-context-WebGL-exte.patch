@@ -1,8 +1,8 @@
 From d0d0124c16832703b6bc6743c0f0a48ec8d1d654 Mon Sep 17 00:00:00 2001
 From: Chronium <chronium@interlink.local>
 Date: Tue, 15 Sep 2026 13:48:28 +0700
-Subject: [PATCH] chronium: render-time noise v2, per-context WebGL extensions,
- audio fix
+Subject: [PATCH 20/20] chronium: render-time noise v2, per-context WebGL
+ extensions, audio fix
 
 Engine Fix Notes (leak test 15/09/2026) A1, A2, A6, A7.
 
