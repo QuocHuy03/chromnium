@@ -154,7 +154,7 @@ index fb2d3e7..a9e91ff 100644
 +      }
 +    }
 +  }
-+  return StaticBitmapImage::Create(std::move(data), info);
++  return StaticBitmapImage::Create(std::move(data), info, gfx::HDRMetadata());
 +}
 +
  constexpr unsigned kMaxCanvasAnimationBacklog = 2;

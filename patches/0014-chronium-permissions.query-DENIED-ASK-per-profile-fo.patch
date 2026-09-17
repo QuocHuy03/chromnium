@@ -197,7 +197,7 @@ index e36c344..5c5b0ff 100644
 -      std::move(result), std::move(descriptor));
 +  // Chronium: map DENIED to ASK for the permissions fingerprinters
 +  // cross-check against JS-visible state (Notification.permission etc.).
-+  if (result == mojom::blink::PermissionStatus::DENIED &&
++  if (result->status == mojom::blink::PermissionStatus::DENIED &&
 +      FingerprintState::IsActive()) {
 +    using mojom::blink::PermissionName;
 +    switch (descriptor->name) {
@@ -206,7 +206,7 @@ index e36c344..5c5b0ff 100644
 +      case PermissionName::AUDIO_CAPTURE:
 +      case PermissionName::VIDEO_CAPTURE:
 +      case PermissionName::MIDI:
-+        result = mojom::blink::PermissionStatus::ASK;
++        result->status = mojom::blink::PermissionStatus::ASK;
 +        break;
 +      default:
 +        break;
@@ -214,7 +214,7 @@ index e36c344..5c5b0ff 100644
 +  }
 +
 +  PermissionStatusListener* listener =
-+      GetOrCreatePermissionStatusListener(result, std::move(descriptor));
++      GetOrCreatePermissionStatusListener(std::move(result), std::move(descriptor));
    if (listener)
      resolver->Resolve(PermissionStatus::Take(listener, resolver));
  }

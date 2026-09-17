@@ -27,6 +27,20 @@ Subject: [PATCH 19/20] chronium: patches 0019+0020+0021 (post-patched
  create mode 100644 chrome/browser/license/license_gate.cc
  create mode 100644 chrome/browser/license/license_gate.h
 
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 140c21c59d4bb..0553d28f5e0bb 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1275,6 +1275,9 @@ source_set("core") {
+       "fingerprint/fingerprint_profile.cc",
+       "fingerprint/fingerprint_profile.h",
+       "intranet_redirect_detector.cc",
++      "license/license_gate.cc",
++      "license/license_gate.h",
++      "license/license_secret.h",
+       "process_singleton_startup_lock.cc",
+       "repost_form_warning_controller.cc",
+     ]
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
 index 306ea1c..7b4566c 100644
 --- a/chrome/browser/chrome_browser_main.cc
@@ -561,21 +575,13 @@ index 335b290..14eb2fe 100644
 +          views::style::CONTEXT_LABEL,
 +          views::style::STYLE_BODY_5_EMPHASIS);
 +      chip->SetAutoColorReadabilityEnabled(false);
++      // Fixed red pill with white text (no longer hash-varied per label).
++      const SkColor bg = SkColorSetRGB(0xD9, 0x3E, 0x3E);
 +      chip->SetEnabledColor(SK_ColorWHITE);
-+      // Background: deterministic pastel from a hash of the label text
-+      // so multiple windows pick visibly-distinct colors automatically.
-+      const uint32_t h = base::PersistentHash(label_str);
-+      const SkColor bg = SkColorSetARGB(
-+          0xFF,
-+          // Pastel-ish: mid 90-180 range across all channels, biased to
-+          // saturation by zeroing one channel.
-+          90 + ((h >>  0) & 0x7F),
-+          90 + ((h >>  8) & 0x7F),
-+          90 + ((h >> 16) & 0x7F));
 +      chip->SetBackground(
-+          views::CreateRoundedRectBackground(bg, 4));
++          views::CreateRoundedRectBackground(bg, 10));
 +      chip->SetBorder(
-+          views::CreateEmptyBorder(gfx::Insets::VH(2, 8)));
++          views::CreateEmptyBorder(gfx::Insets::VH(3, 10)));
 +      chip->SetElideBehavior(gfx::ELIDE_TAIL);
 +      chip->SetTooltipText(base::UTF8ToUTF16(label_str));
 +      account_label_chip_ = AddChildView(std::move(chip));

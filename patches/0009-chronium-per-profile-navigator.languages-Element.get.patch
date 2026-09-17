@@ -196,7 +196,7 @@ index 46a9172..2384dca 100644
 -  GetDocument().UpdateStyleAndLayoutForNode(this,
 -                                            DocumentUpdateReason::kJavaScript);
 -  return DOMRect::FromRectF(GetBoundingClientRectNoLifecycleUpdate());
-+  GetDocument().EnsurePaintLocationDataValidForNode(
++  GetDocument().UpdateStyleAndLayoutForNode(
 +      this, DocumentUpdateReason::kJavaScript);
 +  DOMRect* result =
 +      DOMRect::FromRectF(GetBoundingClientRectNoLifecycleUpdate());
