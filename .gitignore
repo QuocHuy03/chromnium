@@ -1,10 +1,11 @@
 # Build output (huge)
 release/
 
-# rcedit, Resource Hacker, and similar third-party tools — fetched
-# per-machine (see scripts/package.bat for download URLs)
+# rcedit, Resource Hacker, gh CLI, and similar third-party tools —
+# fetched per-machine (see scripts/package.bat for download URLs)
 tools/*.exe
 tools/reshacker/
+tools/gh/
 
 # Build/fetch/package logs — scratch output from a single machine's run
 *.log
@@ -20,6 +21,13 @@ include/license_secret.h
 # Encrypted release artifacts — produced by encrypt-profiles.py from the
 # tracked plaintext JSONs. Re-derivable; don't pollute git history.
 config/profiles/*.json.enc
+
+# gen-token.exe has the license secret compiled in (same reason as
+# .profile_key above) — make-package.ps1 rebuilds it fresh from the
+# current .profile_key on every package run; scripts/gen-token-source.ps1
+# (the template, no real secret in it) is what stays tracked.
+scripts/gen-token.exe
+scripts/gen-token*.cs
 
 # OS junk
 Thumbs.db

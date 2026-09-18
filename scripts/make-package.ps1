@@ -56,9 +56,16 @@ New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 # incorrect). Mirror the entire Release/ tree minus build-time
 # artifacts (pdb / lib / obj / siso traces) instead.
 #
-# DO NOT rename chrome.exe → chronium.exe: Chrome's embedded manifest
-# pins chrome.exe in several SxS assembly references; renaming triggers
-# the SxS error on launch.
+# Renaming chrome.exe -> chronium.exe is safe as long as the SxS
+# <version>.manifest file (e.g. 153.0.8010.36.manifest) travels alongside
+# it -- that external manifest is what the exe's embedded manifest
+# actually resolves its dependent assembly against, not the filename.
+# robocopy /E below doesn't exclude *.manifest, so it's already included.
+# (package.bat hit and fixed the same "renamed exe won't launch" issue
+# when its file-extension allowlist was missing *.manifest -- see
+# patches/REBASE-153.md. chronium.ps1 in this package already expects
+# bin\chronium.exe, so NOT renaming here just leaves that launcher
+# pointed at a file that doesn't exist.)
 Write-Host "    mirroring Release/ -> bin/ (component build needs ~600 DLLs)"
 robocopy $ReleaseSrc $BinDir /E `
     /XF "*.pdb" "*.lib" "*.o" "*.obj" "*.tlog" "*.ilk" `
@@ -73,6 +80,47 @@ if ($LASTEXITCODE -ge 8) {
 }
 # robocopy returns 1-7 for successful copies, only >=8 is a real error.
 $LASTEXITCODE = 0
+
+Rename-Item -Path (Join-Path $BinDir 'chrome.exe') -NewName 'chronium.exe'
+
+# --- Brand the icon (chronium.exe + chrome.dll) ---
+# chrome.exe is just a bootstrap stub; the running browser window's
+# icon actually loads from chrome.dll's icon group #101 (IDR_MAINFRAME),
+# so both need patching -- see patches/REBASE-153.md. rcedit's
+# --set-icon only replaces chrome.exe's own icon (fine for Explorer/
+# taskbar-pin display) and can't target chrome.dll's group by number,
+# so Resource Hacker does the dll. Both are optional/best-effort: a
+# missing tool or icon just leaves the stock Chromium icon, not a
+# packaging failure.
+$RcEdit     = Join-Path $BuildRoot 'tools\rcedit.exe'
+$ResHacker  = Join-Path $BuildRoot 'tools\reshacker\ResourceHacker.exe'
+$IconFile   = Join-Path $BuildRoot 'assets\chronium.ico'
+$ChroniumExe = Join-Path $BinDir 'chronium.exe'
+$ChromeDll   = Join-Path $BinDir 'chrome.dll'
+
+if ((Test-Path $ResHacker) -and (Test-Path $IconFile)) {
+    Write-Host "    branding icon (chronium.exe + chrome.dll)..."
+    foreach ($target in @($ChroniumExe, $ChromeDll)) {
+        $mask = if ($target -eq $ChroniumExe) { 'ICONGROUP,IDR_MAINFRAME,' } else { 'ICONGROUP,101,' }
+        $tmp = "$target.tmp"
+        if (Test-Path $tmp) { Remove-Item -Force $tmp }
+        & $ResHacker -open $target -save $tmp -action addoverwrite -res $IconFile -mask $mask -log (Join-Path $BuildRoot 'reshacker-makepkg.log') | Out-Null
+        if (Test-Path $tmp) {
+            Move-Item -Force $tmp $target
+        } else {
+            Write-Warning "Resource Hacker did not produce output for $target (see reshacker-makepkg.log); icon left unchanged."
+        }
+    }
+} else {
+    Write-Warning "tools\reshacker\ResourceHacker.exe or assets\chronium.ico missing -- shipping the stock Chromium icon."
+}
+
+if (Test-Path $RcEdit) {
+    & $RcEdit $ChroniumExe --set-version-string "ProductName" "Chronium" | Out-Null
+    & $RcEdit $ChroniumExe --set-version-string "CompanyName" "Interlink" | Out-Null
+    & $RcEdit $ChroniumExe --set-version-string "FileDescription" "Chronium Browser" | Out-Null
+    & $RcEdit $ChroniumExe --set-version-string "OriginalFilename" "chronium.exe" | Out-Null
+}
 
 $binSize = (Get-ChildItem $BinDir -Recurse | Measure-Object Length -Sum).Sum / 1MB
 $fileCount = (Get-ChildItem $BinDir -Recurse -File).Count
@@ -128,6 +176,39 @@ foreach ($f in $scriptsToShip) {
         continue
     }
     Copy-Item -Path $src -Destination $ScriptsDst -Force
+}
+
+# --- Compile gen-token.exe (native HMAC token generator) ---
+# chronium.ps1's launch path needs a valid --license-ts/-nonce/-token or
+# license_gate.cc silently _exits(0) on startup -- see
+# patches/REBASE-153.md. gen-debug-token.py can make this token too, but
+# requires Python (defeats the "no Python required" zip). The secret
+# can't live in chronium.ps1 itself (plaintext script, trivially
+# readable) so it goes in a tiny COMPILED helper instead -- same
+# protection level as chrome.dll's embedded copy, not committed to git
+# (see .gitignore), rebuilt fresh from the current config\.profile_key
+# on every package run so it can never drift out of sync with whatever
+# secret this build's chrome.dll actually has baked in.
+$KeyFile = Join-Path $BuildRoot 'config\.profile_key'
+$Csc = @(
+    "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+    "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ((Test-Path $KeyFile) -and $Csc) {
+    Write-Host "    compiling gen-token.exe from config\.profile_key..."
+    $genTokenCs = Join-Path $env:TEMP "gen-token-$([guid]::NewGuid()).cs"
+    $genTokenExeOut = Join-Path $ScriptsDst 'gen-token.exe'
+    $genOut = & (Join-Path $ScriptDir 'gen-token-source.ps1') -KeyPath $KeyFile -OutCs $genTokenCs 2>&1
+    $cscOut = & $Csc /nologo "/out:$genTokenExeOut" $genTokenCs 2>&1
+    Remove-Item -Force $genTokenCs -ErrorAction SilentlyContinue
+    if (-not (Test-Path (Join-Path $ScriptsDst 'gen-token.exe'))) {
+        Write-Warning "gen-token.exe compile failed -- chronium.ps1 will fall back to gen-debug-token.py (needs Python) or fail the license gate."
+        Write-Warning "gen-token-source.ps1 output: $genOut"
+        Write-Warning "csc.exe output: $cscOut"
+    }
+} else {
+    Write-Warning "config\.profile_key or csc.exe not found -- skipping gen-token.exe. chronium.ps1's launch will hit the license gate without it."
 }
 
 # Patch chronium.ps1 paths so the script resolves chronium.exe relative

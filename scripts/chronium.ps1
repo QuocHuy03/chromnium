@@ -42,6 +42,7 @@ if (-not (Test-Path $Chronium)) {
 $AccountsRoot = 'C:\ChroniumProfiles'
 $RegistryFile = Join-Path $AccountsRoot 'accounts.json'
 $PrepareScript = Join-Path $ScriptDir 'prepare-profile.ps1'
+$GenTokenExe = Join-Path $ScriptDir 'gen-token.exe'
 
 if (-not (Test-Path $AccountsRoot)) {
     New-Item -ItemType Directory -Path $AccountsRoot -Force | Out-Null
@@ -132,6 +133,33 @@ function Touch-AccountMeta($name) {
     }
 }
 
+function New-LicenseTokenArgs {
+    # chrome.exe's license gate (chrome/browser/license/license_gate.cc)
+    # _exit(0)s at startup without a valid --license-ts/-nonce/-token, so
+    # every launch needs a fresh one. Prefer the compiled gen-token.exe
+    # (no Python needed, matches this package's zip design); fall back to
+    # gen-debug-token.py if a dev is running from source without it built.
+    # The token binds to the CALLING process's PID, so it must be
+    # generated with $PID from this same PowerShell process, right
+    # before Start-Process spawns chrome.exe as its direct child below —
+    # generating it anywhere else binds the wrong ppid and the gate
+    # rejects it.
+    if (Test-Path $GenTokenExe) {
+        $out = & $GenTokenExe --ppid $PID
+        return ($out -split ' ')
+    }
+    $genDebugPy = Join-Path $ScriptDir 'gen-debug-token.py'
+    if (Test-Path $genDebugPy) {
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if ($py) {
+            $out = & python $genDebugPy --ppid $PID
+            return ($out -split ' ')
+        }
+    }
+    Write-Warning "No gen-token.exe and no Python for gen-debug-token.py -- chrome.exe will exit immediately (license gate)."
+    return @()
+}
+
 function Launch-Account($name, $profileName, $url, $proxy) {
     $accDir = Get-AccountDir $name
     $sourceProfile = Join-Path $ProfilesDir "$profileName.json"
@@ -164,6 +192,7 @@ function Launch-Account($name, $profileName, $url, $proxy) {
         '--no-first-run'
     )
     if ($proxy) { $args += "--proxy-server=$proxy" }
+    $args += New-LicenseTokenArgs
     $args += $url
 
     Write-Host ""
