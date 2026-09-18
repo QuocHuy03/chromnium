@@ -63,8 +63,18 @@ function Detect-Country([string]$proxy) {
             # HTTP/HTTPS upstream proxies work this way; SOCKS5 would
             # need a different transport (we recommend chaining via the
             # sidecar instead).
+            #
+            # WebProxy's string constructor does NOT pick up embedded
+            # user:pass@ credentials from the URI -- it silently drops
+            # them, sends unauthenticated, and every request 407s. Parse
+            # the URI ourselves and set .Credentials explicitly.
+            $proxyUri = [System.Uri]$proxy
+            $wp = New-Object System.Net.WebProxy("$($proxyUri.Scheme)://$($proxyUri.Host):$($proxyUri.Port)")
+            if ($proxyUri.UserInfo) {
+                $parts = $proxyUri.UserInfo.Split(':', 2)
+                $wp.Credentials = New-Object System.Net.NetworkCredential($parts[0], $parts[1])
+            }
             $wc = New-Object System.Net.WebClient
-            $wp = New-Object System.Net.WebProxy($proxy)
             $wc.Proxy = $wp
             $body = $wc.DownloadString($url)
         } else {
